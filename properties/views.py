@@ -1,10 +1,8 @@
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
+from rest_framework import viewsets
+from .models import Property
+from .serializers import PropertySerializer
 
 
-@api_view(['GET'])
-def home(request):
-    return Response({
-        "message": "Welcome to Rentease API",
-        "status": "success"
-    })
+class PropertyViewSet(viewsets.ModelViewSet):
+    queryset = Property.objects.all().order_by('-created_at')
+    serializer_class = PropertySerializer
