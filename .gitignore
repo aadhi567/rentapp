@@ -1,4 +1,4 @@
-﻿# Python & Django
+# Python & Django
 *.py[cod]
 *$py.class
 __pycache__/
@@ -56,3 +56,7 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Temp & Output
+output/
+tmp/
