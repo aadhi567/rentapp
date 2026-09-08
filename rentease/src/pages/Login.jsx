@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { HomeIcon, EyeIcon, EyeOffIcon, WarningIcon } from "../components/Icons";
 import "./Login.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://rentapp-daiv.onrender.com/api";
 
 function Login() {
   const navigate = useNavigate();

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeftIcon, DownloadIcon, MailIcon } from "../components/Icons";
 import "./ReceiptView.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://rentapp-daiv.onrender.com/api";
 
 function ReceiptView() {
   const { paymentId } = useParams();

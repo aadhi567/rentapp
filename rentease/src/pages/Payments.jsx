@@ -14,7 +14,7 @@ import "./Payments.css";
 
 
 const API_URL =
-  "http://127.0.0.1:8000/api";
+  import.meta.env.VITE_API_URL || "https://rentapp-daiv.onrender.com/api";
 
 
 const initialForm = {

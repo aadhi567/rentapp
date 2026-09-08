@@ -4,7 +4,7 @@ import LandlordLayout from "../components/LandlordLayout";
 import { BuildingIcon, PlusIcon } from "../components/Icons";
 import "./Buildings.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://rentapp-daiv.onrender.com/api";
 
 function Buildings() {
   const navigate = useNavigate();

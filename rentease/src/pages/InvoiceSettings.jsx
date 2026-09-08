@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import LandlordLayout from "../components/LandlordLayout";
 import "./InvoiceSettings.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://rentapp-daiv.onrender.com/api";
 
 const EMPTY_FORM = {
   business_name: "",
