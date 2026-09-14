@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeftIcon, DownloadIcon, MailIcon } from "../components/Icons";
 import "./InvoiceView.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 function InvoiceView() {
   const navigate = useNavigate();

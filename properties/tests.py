@@ -265,6 +265,217 @@ class RentEaseAutomatedChecksTest(TestCase):
         self.assertEqual(resp.status_code, 401)
 
     # -------------------------------------------------------------------------
+    # Landlord Email Login Tests
+    # -------------------------------------------------------------------------
+    def test_landlord_login_with_email_key(self):
+        """Verify landlord can log in using their email address in email field."""
+        resp = self.client.post(
+            "/api/auth/login/",
+            {
+                "email": "landlord_a@example.com",
+                "password": "SecurePassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+        self.assertIn("refresh", resp.data)
+        self.assertEqual(resp.data["user"]["role"], "landlord")
+        self.assertEqual(resp.data["user"]["email"], "landlord_a@example.com")
+
+        # Validate access token works
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+        me_resp = self.client.get("/api/auth/me/")
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.data["username"], "landlord_a")
+        self.assertEqual(me_resp.data["role"], "landlord")
+
+    def test_landlord_login_with_email_in_username_field(self):
+        """Verify landlord can log in using email passed in username field."""
+        resp = self.client.post(
+            "/api/auth/login/",
+            {
+                "username": "landlord_a@example.com",
+                "password": "SecurePassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+
+    def test_landlord_login_email_case_insensitive_and_whitespace(self):
+        """Verify email login handles uppercase and leading/trailing whitespace."""
+        resp = self.client.post(
+            "/api/auth/login/",
+            {
+                "email": "  LANDLORD_A@EXAMPLE.COM  ",
+                "password": "SecurePassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+
+    def test_landlord_login_invalid_credentials(self):
+        """Verify wrong password or nonexistent email are rejected with 401."""
+        # Wrong password
+        resp = self.client.post(
+            "/api/auth/login/",
+            {
+                "email": "landlord_a@example.com",
+                "password": "IncorrectPassword!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 401)
+
+        # Nonexistent email
+        resp = self.client.post(
+            "/api/auth/login/",
+            {
+                "email": "nobody@example.com",
+                "password": "SecurePassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_landlord_login_dedicated_endpoint(self):
+        """Verify /api/auth/landlord-login/ permits landlords and blocks non-landlords."""
+        # Landlord login succeeds
+        resp = self.client.post(
+            "/api/auth/landlord-login/",
+            {
+                "email": "landlord_a@example.com",
+                "password": "SecurePassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+
+        # Create a non-landlord tenant user
+        tenant_user = User.objects.create_user(
+            username="tenant_only",
+            email="tenant_only@example.com",
+            password="TenantPassword123!",
+        )
+        Tenant.objects.create(
+            user=tenant_user,
+            first_name="Tenant",
+            last_name="Only",
+            email="tenant_only@example.com",
+        )
+
+        # Non-landlord is rejected with 403 Forbidden
+        non_landlord_resp = self.client.post(
+            "/api/auth/landlord-login/",
+            {
+                "email": "tenant_only@example.com",
+                "password": "TenantPassword123!",
+            },
+            format="json",
+        )
+        self.assertEqual(non_landlord_resp.status_code, 403)
+        self.assertIn("Access restricted to landlord accounts only.", non_landlord_resp.data["detail"])
+
+    def test_check_email_endpoint(self):
+        """Verify check-email endpoint returns exists=True for existing users and exists=False for new users."""
+        # Existing landlord
+        resp = self.client.post(
+            "/api/auth/check-email/",
+            {"email": "landlord_a@example.com"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["exists"])
+        self.assertEqual(resp.data["role"], "landlord")
+        self.assertEqual(resp.data["first_name"], "Alice")
+
+        # New email
+        new_resp = self.client.post(
+            "/api/auth/check-email/",
+            {"email": "brandnew@example.com"},
+            format="json",
+        )
+        self.assertEqual(new_resp.status_code, 200)
+        self.assertFalse(new_resp.data["exists"])
+
+        # Empty email rejected
+        empty_resp = self.client.post(
+            "/api/auth/check-email/",
+            {"email": ""},
+            format="json",
+        )
+        self.assertEqual(empty_resp.status_code, 400)
+
+    def test_register_without_username_auto_generates(self):
+        """Verify registration without explicit username automatically generates a unique username from email."""
+        resp = self.client.post(
+            "/api/auth/register/",
+            {
+                "email": "auto_landlord@example.com",
+                "first_name": "Dave",
+                "last_name": "Smith",
+                "role": "landlord",
+                "password": "SecurePassword999!",
+                "confirm_password": "SecurePassword999!",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["user"]["email"], "auto_landlord@example.com")
+        self.assertTrue(resp.data["user"]["username"].startswith("auto_landlord"))
+
+    def test_google_login_existing_user(self):
+        """Verify Google login with existing landlord returns 200 and tokens."""
+        resp = self.client.post(
+            "/api/auth/google/",
+            {
+                "email": "landlord_a@example.com",
+                "name": "Alice Owner",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+        self.assertIn("refresh", resp.data)
+        self.assertEqual(resp.data["user"]["role"], "landlord")
+        self.assertEqual(resp.data["user"]["email"], "landlord_a@example.com")
+
+    def test_google_login_new_user(self):
+        """Verify Google login with new email automatically provisions a landlord account."""
+        resp = self.client.post(
+            "/api/auth/google/",
+            {
+                "email": "fresh_google@gmail.com",
+                "name": "Fresh Google Landlord",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("access", resp.data)
+        self.assertEqual(resp.data["user"]["role"], "landlord")
+        self.assertEqual(resp.data["user"]["email"], "fresh_google@gmail.com")
+
+    def test_google_login_requires_email(self):
+        """Verify Google login without email returns 400."""
+        resp = self.client.post(
+            "/api/auth/google/",
+            {"email": ""},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_system_accounts_endpoint(self):
+        """Verify /api/auth/system-accounts/ returns all registered users with email."""
+        resp = self.client.get("/api/auth/system-accounts/")
+        self.assertEqual(resp.status_code, 200)
+        emails = [acc["email"] for acc in resp.data]
+        self.assertIn("landlord_a@example.com", emails)
+        self.assertIn("landlord_b@example.com", emails)
+
+    # -------------------------------------------------------------------------
     # Gate 3: Ownership Boundary Enforcement
     # -------------------------------------------------------------------------
     def test_ownership_isolation(self):
@@ -654,6 +865,40 @@ class TenantBillingCommunicationTests(TestCase):
             status="pending",
         )
 
+        # Residential Unit & Lease for isolation testing
+        self.res_unit = Unit.objects.create(
+            floor=self.floor,
+            unit_number="RES-201",
+            name="Residential 201",
+            unit_type="residential",
+            status="occupied",
+            monthly_rent=Decimal("15000.00"),
+            area=800,
+        )
+        self.res_tenant = Tenant.objects.create(
+            first_name="Pooja",
+            last_name="Sharma",
+            email="pooja.residential@example.com",
+            phone="9876599999",
+        )
+        self.res_lease = Lease.objects.create(
+            tenant=self.res_tenant,
+            unit=self.res_unit,
+            start_date=date(2026, 1, 1),
+            end_date=date(2027, 1, 1),
+            monthly_rent=Decimal("15000.00"),
+            status="active",
+            lease_type="rent",
+        )
+        self.res_payment = Payment.objects.create(
+            lease=self.res_lease,
+            payment_type="rent",
+            amount=Decimal("15000.00"),
+            due_date=date(2026, 9, 10),
+            status="pending",
+        )
+
+
     def _login(self, username, password):
         resp = self.client.post(
             "/api/auth/login/",
@@ -694,6 +939,7 @@ class TenantBillingCommunicationTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         sent_email = mail.outbox[0]
         self.assertIn("rohan@mehtaelectronics.com", sent_email.to)
+        self.assertIn("homrent1@gmail.com", sent_email.from_email)
         self.assertIn("Commercial Rent Invoice", sent_email.subject)
         self.assertIn("COMM-101", sent_email.subject)
 
@@ -808,6 +1054,7 @@ class TenantBillingCommunicationTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         sent_email = mail.outbox[0]
         self.assertIn("rohan@mehtaelectronics.com", sent_email.to)
+        self.assertIn("homrent1@gmail.com", sent_email.from_email)
         self.assertIn("Receipt", sent_email.subject)
 
         # Verify required fields in email body:
@@ -838,6 +1085,10 @@ class TenantBillingCommunicationTests(TestCase):
         ).first()
         self.assertIsNotNone(receipt_log)
         self.assertEqual(receipt_log.status, "sent")
+        self.assertEqual(receipt_log.recipient_email, "rohan@mehtaelectronics.com")
+        self.assertEqual(receipt_log.retry_count, 0)
+        self.assertEqual(receipt_log.error_message, "")
+        self.assertIsNotNone(receipt_log.sent_at)
 
     def test_landlord_manual_resend_receipt(self):
         """
@@ -896,5 +1147,338 @@ class TenantBillingCommunicationTests(TestCase):
         retry_out = io.StringIO()
         call_command("retry_failed_billing_emails", stdout=retry_out)
         self.assertIn("Done", retry_out.getvalue())
+
+    def test_receipt_email_only_on_paid_status(self):
+        """
+        Confirms a receipt email is automatically sent ONLY when a rent payment changes to 'paid'.
+        Pending payments or other field updates do NOT trigger a receipt email.
+        """
+        token = self._login("landlord_test_a", "Password123!")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        mail.outbox.clear()
+
+        # Create a pending payment via API -> No receipt should be dispatched
+        create_resp = self.client.post(
+            "/api/payments/",
+            {
+                "lease": self.lease.id,
+                "amount": "25000.00",
+                "payment_type": "rent",
+                "due_date": "2026-12-05",
+                "status": "pending",
+            },
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, 201)
+        created_payment_id = create_resp.data["id"]
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Update note/description without changing status to paid -> No receipt
+        patch_resp = self.client.patch(
+            f"/api/payments/{created_payment_id}/",
+            {"description": "Updated billing remarks"},
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Now mark payment as paid -> Receipt email MUST be sent automatically
+        paid_resp = self.client.patch(
+            f"/api/payments/{created_payment_id}/",
+            {
+                "status": "paid",
+                "paid_date": "2026-12-04",
+                "payment_method": "bank_transfer",
+                "transaction_id": "IMPS-DEC-9988",
+            },
+            format="json",
+        )
+        self.assertEqual(paid_resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("rohan@mehtaelectronics.com", mail.outbox[0].to)
+        self.assertIn("homrent1@gmail.com", mail.outbox[0].from_email)
+
+        # Update description on already paid payment -> Should NOT send duplicate receipt
+        patch_paid_resp = self.client.patch(
+            f"/api/payments/{created_payment_id}/",
+            {"description": "Final reconciled payment"},
+            format="json",
+        )
+        self.assertEqual(patch_paid_resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_failed_receipt_delivery_and_retry(self):
+        """
+        Tests failed receipt email logging when tenant has no email,
+        and successful retry after restoring tenant email.
+        """
+        token = self._login("landlord_test_a", "Password123!")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        mail.outbox.clear()
+
+        # Remove email to induce delivery failure
+        self.tenant.email = ""
+        self.tenant.save()
+
+        # Update payment to paid -> Delivery should fail and record failed BillingEmailLog
+        resp = self.client.patch(
+            f"/api/payments/{self.pending_payment.id}/",
+            {
+                "status": "paid",
+                "paid_date": "2026-09-09",
+                "payment_method": "online",
+                "transaction_id": "ONL-100200",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 0)
+
+        # Verify BillingEmailLog recorded failure
+        receipt_log = BillingEmailLog.objects.filter(
+            payment=self.pending_payment,
+            email_type="receipt",
+        ).first()
+        self.assertIsNotNone(receipt_log)
+        self.assertEqual(receipt_log.status, "failed")
+        self.assertIn("no registered email", receipt_log.error_message.lower())
+        self.assertEqual(receipt_log.retry_count, 0)
+
+        # Restore valid email and retry via retry-email endpoint
+        self.tenant.email = "rohan.receipt@mehtaelectronics.com"
+        self.tenant.save()
+
+        retry_resp = self.client.post(
+            f"/api/payments/{self.pending_payment.id}/retry-email/",
+            {"email_type": "receipt"},
+            format="json",
+        )
+        self.assertEqual(retry_resp.status_code, 200)
+        self.assertEqual(retry_resp.data["email_log"]["status"], "sent")
+        self.assertEqual(retry_resp.data["email_log"]["retry_count"], 1)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("rohan.receipt@mehtaelectronics.com", mail.outbox[0].to)
+        self.assertIn("homrent1@gmail.com", mail.outbox[0].from_email)
+
+    def test_email_settings_configuration_and_sender_account(self):
+        """
+        Verifies default email settings use the homrent1@gmail.com account
+        and adhere to required configuration structure.
+        """
+        from django.conf import settings as s
+        self.assertIn("homrent1@gmail.com", s.DEFAULT_FROM_EMAIL)
+        self.assertEqual(s.EMAIL_HOST_USER, "homrent1@gmail.com")
+        self.assertEqual(s.EMAIL_HOST, "smtp.gmail.com")
+        self.assertEqual(s.EMAIL_PORT, 587)
+        self.assertTrue(s.EMAIL_USE_TLS)
+
+    def test_residential_units_do_not_receive_invoices_or_receipts(self):
+        """
+        Confirms our business rule:
+        - Only commercial tenants receive invoices and commercial receipts.
+        - Residential tenants do NOT receive invoices or commercial receipts.
+        """
+        token = self._login("landlord_test_a", "Password123!")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        mail.outbox.clear()
+
+        # 1. Invoice PDF viewing/download is allowed for landlord records
+        inv_resp = self.client.get(f"/api/payments/{self.res_payment.id}/invoice/")
+        self.assertEqual(inv_resp.status_code, 200)
+
+        # 2. Receipt PDF viewing/download is allowed for landlord records
+        self.res_payment.status = "paid"
+        self.res_payment.paid_date = date(2026, 9, 8)
+        self.res_payment.save()
+        rec_resp = self.client.get(f"/api/payments/{self.res_payment.id}/receipt/")
+        self.assertEqual(rec_resp.status_code, 200)
+
+        # 3. Send-invoice endpoint must reject residential payment
+        send_inv_resp = self.client.post(f"/api/payments/{self.res_payment.id}/send-invoice/")
+        self.assertEqual(send_inv_resp.status_code, 400)
+        self.assertIn("commercial", send_inv_resp.data[0].lower())
+
+        # 4. Send-receipt endpoint must reject residential payment
+        send_rec_resp = self.client.post(f"/api/payments/{self.res_payment.id}/send-receipt/")
+        self.assertEqual(send_rec_resp.status_code, 400)
+        self.assertIn("commercial", send_rec_resp.data[0].lower())
+
+        # 5. Direct calls to send_invoice_email and send_receipt_email must also reject residential
+        log_inv = send_invoice_email(self.res_payment)
+        self.assertEqual(log_inv.status, "failed")
+        self.assertIn("commercial", log_inv.error_message.lower())
+
+        log_rec = send_receipt_email(self.res_payment)
+        self.assertEqual(log_rec.status, "failed")
+        self.assertIn("commercial", log_rec.error_message.lower())
+
+        # Absolutely 0 emails sent to residential tenant
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_duplicate_email_protection_and_force_resend(self):
+        """
+        Confirms idempotency:
+        - Calling send-invoice multiple times does NOT send duplicate emails.
+        - Calling send-receipt multiple times does NOT send duplicate emails.
+        - Explicit force=True allows intentional re-sending.
+        """
+        token = self._login("landlord_test_a", "Password123!")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        mail.outbox.clear()
+
+        # Send initial invoice email
+        resp1 = self.client.post(f"/api/payments/{self.pending_payment.id}/send-invoice/")
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        # Duplicate call (e.g. page refresh, network retry) -> must NOT send duplicate email
+        resp2 = self.client.post(f"/api/payments/{self.pending_payment.id}/send-invoice/")
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        # Explicit force resend -> sends 2nd email
+        resp3 = self.client.post(
+            f"/api/payments/{self.pending_payment.id}/send-invoice/",
+            {"force": True},
+            format="json",
+        )
+        self.assertEqual(resp3.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
+
+        # Now test receipt duplicate protection
+        mail.outbox.clear()
+        self.pending_payment.status = "paid"
+        self.pending_payment.paid_date = date(2026, 9, 8)
+        self.pending_payment.payment_method = "bank_transfer"
+        self.pending_payment.save()
+
+        # First receipt send
+        rec_resp1 = self.client.post(f"/api/payments/{self.pending_payment.id}/send-receipt/")
+        self.assertEqual(rec_resp1.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        # Duplicate receipt send -> must NOT send duplicate email
+        rec_resp2 = self.client.post(f"/api/payments/{self.pending_payment.id}/send-receipt/")
+        self.assertEqual(rec_resp2.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+
+        # Explicit force receipt resend -> sends 2nd receipt
+        rec_resp3 = self.client.post(
+            f"/api/payments/{self.pending_payment.id}/send-receipt/",
+            {"force": True},
+            format="json",
+        )
+        self.assertEqual(rec_resp3.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_payment_marking_paid_safe_if_email_fails(self):
+        """
+        Verifies that even if email dispatch encounters an unexpected error,
+        marking a payment as 'paid' still completes safely and does not crash.
+        """
+        token = self._login("landlord_test_a", "Password123!")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        mail.outbox.clear()
+
+        # Set tenant email to empty to cause email failure
+        self.tenant.email = ""
+        self.tenant.save()
+
+        resp = self.client.patch(
+            f"/api/payments/{self.pending_payment.id}/",
+            {
+                "status": "paid",
+                "paid_date": "2026-09-08",
+                "payment_method": "online",
+            },
+            format="json",
+        )
+        # Payment must successfully be marked as paid
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "paid")
+        self.pending_payment.refresh_from_db()
+        self.assertEqual(self.pending_payment.status, "paid")
+
+    def test_commercial_tenant_email_validation_in_serializer(self):
+        """
+        Verifies TenantSerializer requires an email address when commercial fields are present.
+        """
+        from properties.serializers import TenantSerializer
+
+        # Missing email for commercial tenant -> invalid
+        serializer = TenantSerializer(data={
+            "first_name": "Commercial",
+            "last_name": "Tenant",
+            "shop_name": "Apex Bakery",
+            "phone": "9988776655",
+            "email": "",
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("email", serializer.errors)
+
+        # Valid email for commercial tenant -> valid
+        valid_serializer = TenantSerializer(data={
+            "first_name": "Commercial",
+            "last_name": "Tenant",
+            "shop_name": "Apex Bakery",
+            "phone": "9988776655",
+            "email": "bakery@apex.com",
+        })
+        self.assertTrue(valid_serializer.is_valid())
+
+    def test_smtp_diagnostics_command_execution(self):
+        """
+        Verifies test_smtp_connection management command runs cleanly without crashing.
+        """
+        out = io.StringIO()
+        call_command("test_smtp_connection", stdout=out)
+        output = out.getvalue()
+        self.assertIn("RentEase SMTP Connection Diagnostic", output)
+        self.assertIn("EMAIL_HOST", output)
+
+    def test_upi_qr_code_in_invoice_and_receipt_emails(self):
+        """
+        Verifies that when a landlord configures a UPI QR code image and UPI ID in InvoiceSettings,
+        the emails embed the inline QR image and display the Quick Pay UPI section.
+        """
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image as PILImage
+
+        buf = io.StringIO() if False else io.BytesIO()
+        img = PILImage.new("RGB", (60, 60), color="white")
+        img.save(buf, format="PNG")
+        qr_file = SimpleUploadedFile("my_upi_qr.png", buf.getvalue(), content_type="image/png")
+
+        self.settings.upi_id = "landlord@okhdfcbank"
+        self.settings.upi_qr_code = qr_file
+        self.settings.save()
+
+        # Send invoice email
+        mail.outbox.clear()
+        inv_log = send_invoice_email(self.pending_payment, force=True)
+        self.assertEqual(inv_log.status, "sent")
+        self.assertEqual(len(mail.outbox), 1)
+        sent_inv = mail.outbox[0]
+
+        # Verify inline QR image attachment and cid:upi_qr_code in HTML
+        self.assertIn("Quick Pay via UPI", sent_inv.alternatives[0][0])
+        self.assertIn("cid:upi_qr_code", sent_inv.alternatives[0][0])
+        self.assertIn("landlord@okhdfcbank", sent_inv.alternatives[0][0])
+        self.assertIn("landlord@okhdfcbank", sent_inv.body)
+
+        # Mark paid and send receipt email
+        mail.outbox.clear()
+        self.pending_payment.status = "paid"
+        self.pending_payment.paid_date = date(2026, 9, 8)
+        self.pending_payment.save()
+        rec_log = send_receipt_email(self.pending_payment, force=True)
+        self.assertEqual(rec_log.status, "sent")
+        self.assertEqual(len(mail.outbox), 1)
+        sent_rec = mail.outbox[0]
+        self.assertIn("cid:upi_qr_code", sent_rec.alternatives[0][0])
+        self.assertIn("Landlord Official UPI QR", sent_rec.alternatives[0][0])
+
+
 
 

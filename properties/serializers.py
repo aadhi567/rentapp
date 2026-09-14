@@ -17,6 +17,7 @@ from .models import (
 class InvoiceSettingsSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     signature_url = serializers.SerializerMethodField()
+    upi_qr_code_url = serializers.SerializerMethodField()
 
     class Meta:
         model = InvoiceSettings
@@ -37,11 +38,14 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
             "ifsc",
             "branch",
             "payment_instructions",
+            "upi_id",
             "due_day",
             "logo",
             "logo_url",
             "signature",
             "signature_url",
+            "upi_qr_code",
+            "upi_qr_code_url",
             "created_at",
             "updated_at",
         ]
@@ -50,6 +54,7 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
             "landlord",
             "logo_url",
             "signature_url",
+            "upi_qr_code_url",
             "created_at",
             "updated_at",
         ]
@@ -72,8 +77,11 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
     def get_signature_url(self, obj):
         return self._file_url(obj, "signature")
 
+    def get_upi_qr_code_url(self, obj):
+        return self._file_url(obj, "upi_qr_code")
+
     def validate(self, attrs):
-        for field in ("logo", "signature"):
+        for field in ("logo", "signature", "upi_qr_code"):
             upload = attrs.get(field)
             if not upload:
                 continue
@@ -286,6 +294,20 @@ class TenantSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate_email(self, value):
+        if value:
+            return value.strip().lower()
+        return value
+
+    def validate(self, attrs):
+        shop_name = attrs.get("shop_name", getattr(self.instance, "shop_name", ""))
+        email = attrs.get("email", getattr(self.instance, "email", ""))
+        if shop_name and not (email or "").strip():
+            raise serializers.ValidationError({
+                "email": "A valid registered email address is required for commercial tenants to receive invoices and receipts."
+            })
+        return attrs
 
     def validate_gst_rate(self, value):
         if value < 0 or value > 100:

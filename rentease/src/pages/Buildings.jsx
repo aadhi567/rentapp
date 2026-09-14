@@ -4,7 +4,7 @@ import LandlordLayout from "../components/LandlordLayout";
 import { BuildingIcon, PlusIcon } from "../components/Icons";
 import "./Buildings.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 function Buildings() {
   const navigate = useNavigate();
@@ -46,10 +46,13 @@ function Buildings() {
     branch: "",
     payment_instructions: "",
     due_day: 7,
+    upi_id: "",
     logo: null,
     signature: null,
+    upi_qr_code: null,
     logo_url: null,
     signature_url: null,
+    upi_qr_code_url: null,
   });
 
   const [error, setError] = useState("");
@@ -326,9 +329,22 @@ function Buildings() {
       value,
     } = event.target;
 
+    let sanitizedValue = value;
+
+    // Building form validation:
+    // City and State must not contain numbers.
+    // Pincode must contain digits only and be at most 6 digits.
+    if (name === "city" || name === "state") {
+      sanitizedValue = value.replace(/[^A-Za-z\s.'-]/g, "");
+    }
+
+    if (name === "pincode") {
+      sanitizedValue = value.replace(/\D/g, "").slice(0, 6);
+    }
+
     setForm((previous) => ({
       ...previous,
-      [name]: value,
+      [name]: sanitizedValue,
     }));
   };
 
@@ -379,6 +395,41 @@ function Buildings() {
     if (!form.address.trim()) {
       setError(
         "Building address is required."
+      );
+      return;
+    }
+
+    if (!form.city.trim()) {
+      setError(
+        "City is required."
+      );
+      return;
+    }
+
+    if (!/^[A-Za-z\\s.'-]+$/.test(form.city.trim())) {
+      setError(
+        "City can contain letters, spaces, periods, apostrophes and hyphens only."
+      );
+      return;
+    }
+
+    if (!form.state.trim()) {
+      setError(
+        "State is required."
+      );
+      return;
+    }
+
+    if (!/^[A-Za-z\\s.'-]+$/.test(form.state.trim())) {
+      setError(
+        "State can contain letters, spaces, periods, apostrophes and hyphens only."
+      );
+      return;
+    }
+
+    if (!/^\\d{6}$/.test(form.pincode.trim())) {
+      setError(
+        "Pincode must contain exactly 6 digits."
       );
       return;
     }
@@ -498,6 +549,41 @@ function Buildings() {
     if (!form.address.trim()) {
       setError(
         "Building address is required."
+      );
+      return;
+    }
+
+    if (!form.city.trim()) {
+      setError(
+        "City is required."
+      );
+      return;
+    }
+
+    if (!/^[A-Za-z\\s.'-]+$/.test(form.city.trim())) {
+      setError(
+        "City can contain letters, spaces, periods, apostrophes and hyphens only."
+      );
+      return;
+    }
+
+    if (!form.state.trim()) {
+      setError(
+        "State is required."
+      );
+      return;
+    }
+
+    if (!/^[A-Za-z\\s.'-]+$/.test(form.state.trim())) {
+      setError(
+        "State can contain letters, spaces, periods, apostrophes and hyphens only."
+      );
+      return;
+    }
+
+    if (!/^\\d{6}$/.test(form.pincode.trim())) {
+      setError(
+        "Pincode must contain exactly 6 digits."
       );
       return;
     }
@@ -719,10 +805,13 @@ function Buildings() {
       branch: "",
       payment_instructions: "",
       due_day: 7,
+      upi_id: "",
       logo: null,
       signature: null,
+      upi_qr_code: null,
       logo_url: null,
       signature_url: null,
+      upi_qr_code_url: null,
     });
   };
 
@@ -815,11 +904,15 @@ function Buildings() {
           payment_instructions:
             existing.payment_instructions || "",
           due_day: existing.due_day || 7,
+          upi_id: existing.upi_id || "",
           logo: null,
           signature: null,
+          upi_qr_code: null,
           logo_url: existing.logo_url || null,
           signature_url:
             existing.signature_url || null,
+          upi_qr_code_url:
+            existing.upi_qr_code_url || null,
         });
       }
     } catch (err) {
@@ -903,6 +996,15 @@ function Buildings() {
         );
       }
 
+      if (
+        invoiceTemplate.upi_qr_code instanceof File
+      ) {
+        formData.append(
+          "upi_qr_code",
+          invoiceTemplate.upi_qr_code
+        );
+      }
+
       const endpoint = invoiceTemplateId
         ? `${API_URL}/invoice-settings/${invoiceTemplateId}/`
         : `${API_URL}/invoice-settings/`;
@@ -961,11 +1063,15 @@ function Buildings() {
         payment_instructions:
           data.payment_instructions || "",
         due_day: data.due_day || 7,
+        upi_id: data.upi_id || "",
         logo: null,
         signature: null,
+        upi_qr_code: null,
         logo_url: data.logo_url || null,
         signature_url:
           data.signature_url || null,
+        upi_qr_code_url:
+          data.upi_qr_code_url || null,
       });
 
       closeInvoiceTemplate();
@@ -1420,6 +1526,7 @@ function Buildings() {
                   placeholder="Chennai"
                   disabled={saving}
                   required
+                  autoComplete="address-level2"
                 />
 
               </div>
@@ -1440,6 +1547,7 @@ function Buildings() {
                   placeholder="Tamil Nadu"
                   disabled={saving}
                   required
+                  autoComplete="address-level1"
                 />
 
               </div>
@@ -1460,6 +1568,10 @@ function Buildings() {
                   placeholder="600040"
                   disabled={saving}
                   required
+                  inputMode="numeric"
+                  maxLength={6}
+                  pattern="\\d{6}"
+                  autoComplete="postal-code"
                 />
 
               </div>
@@ -1847,6 +1959,39 @@ function Buildings() {
                   </small>
                 </div>
 
+                <div className="form-group">
+                  <label>
+                    UPI Payment QR Code
+                  </label>
+
+                  <input
+                    type="file"
+                    name="upi_qr_code"
+                    accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                    onChange={
+                      handleInvoiceTemplateChange
+                    }
+                    disabled={
+                      invoiceTemplateSaving
+                    }
+                  />
+
+                  {invoiceTemplate.upi_qr_code_url && (
+                    <div className="invoice-asset-preview upi-qr-preview">
+                      <img
+                        src={
+                          invoiceTemplate.upi_qr_code_url
+                        }
+                        alt="Current UPI QR code"
+                      />
+                    </div>
+                  )}
+
+                  <small>
+                    PNG, JPG, JPEG or WEBP. Maximum 5 MB.
+                  </small>
+                </div>
+
                 <div className="invoice-template-section-title">
                   Payment Details
                 </div>
@@ -1917,6 +2062,24 @@ function Buildings() {
                       handleInvoiceTemplateChange
                     }
                     placeholder="Branch name"
+                    disabled={
+                      invoiceTemplateSaving
+                    }
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>UPI ID (VPA)</label>
+
+                  <input
+                    name="upi_id"
+                    value={
+                      invoiceTemplate.upi_id
+                    }
+                    onChange={
+                      handleInvoiceTemplateChange
+                    }
+                    placeholder="e.g. merchant@okhdfcbank"
                     disabled={
                       invoiceTemplateSaving
                     }

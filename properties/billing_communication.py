@@ -1,12 +1,80 @@
 import calendar
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
+import smtplib
 
 from django.conf import settings as django_settings
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
 
 from .models import Payment, Lease, InvoiceSettings, BillingEmailLog
+
+
+def _sanitize_and_format_email_error(exc):
+    """
+    Sanitizes any leaked credentials and formats technical SMTP errors into
+    clear, actionable messages for landlords.
+    """
+    err_msg = str(exc)
+    host_pw = getattr(django_settings, "EMAIL_HOST_PASSWORD", "")
+    if host_pw and host_pw in err_msg:
+        err_msg = err_msg.replace(host_pw, "******")
+
+    # Check for authentication failures, missing App Password, or invalid credentials
+    if (
+        "530" in err_msg
+        or "5.7.0" in err_msg
+        or "Authentication Required" in err_msg
+        or "Username and Password not accepted" in err_msg
+        or "BadCredentials" in err_msg
+        or isinstance(exc, smtplib.SMTPAuthenticationError)
+    ):
+        return (
+            "SMTP Authentication failed: Google App Password is required. "
+            "Please generate a 16-character App Password in your Google Account security settings, "
+            "set EMAIL_HOST_PASSWORD in backend .env, and restart the backend server."
+        )
+
+    return err_msg[:1000]
+
+
+def _attach_upi_qr_inline(msg, inv_settings):
+    """
+    Attaches the landlord's UPI QR code image inline with Content-ID <upi_qr_code>
+    so email clients display it directly inside the email body without external blocking.
+    """
+    if not inv_settings or not getattr(inv_settings, "upi_qr_code", None):
+        return False
+    try:
+        qr_file = inv_settings.upi_qr_code
+        img_data = None
+        import os
+        if hasattr(qr_file, "path") and os.path.exists(qr_file.path):
+            with open(qr_file.path, "rb") as f:
+                img_data = f.read()
+        elif qr_file:
+            qr_file.open("rb")
+            img_data = qr_file.read()
+            qr_file.close()
+
+        if not img_data:
+            return False
+
+        import mimetypes
+        from email.mime.image import MIMEImage
+
+        mime_type, _ = mimetypes.guess_type(getattr(qr_file, "name", "") or "qr.png")
+        subtype = "png"
+        if mime_type and "/" in mime_type:
+            subtype = mime_type.split("/")[1]
+
+        image_part = MIMEImage(img_data, _subtype=subtype)
+        image_part.add_header("Content-ID", "<upi_qr_code>")
+        image_part.add_header("Content-Disposition", "inline", filename="upi_qr_code.png")
+        msg.attach(image_part)
+        return True
+    except Exception:
+        return False
 
 
 def resolve_invoice_settings(payment):
@@ -53,10 +121,43 @@ def _get_billed_month(due_date):
     return f"{calendar.month_name[prev_m]} {prev_y}"
 
 
-def send_invoice_email(payment, is_retry=False, email_log=None):
+def format_building_address(building):
+    """
+    Constructs a complete, formatted address for a building.
+    Example: 'aadhi complex, anna nagar, chennai, tamil nadu - 600021'
+    """
+    if not building:
+        return "-"
+
+    parts = []
+    building_name = (getattr(building, "name", "") or "").strip()
+    building_address = (getattr(building, "address", "") or "").strip()
+
+    if building_name:
+        parts.append(building_name)
+    if building_address and building_address.lower() != building_name.lower():
+        parts.append(building_address)
+
+    city = (getattr(building, "city", "") or "").strip()
+    state = (getattr(building, "state", "") or "").strip()
+    city_state = [p for p in (city, state) if p]
+    if city_state:
+        parts.append(", ".join(city_state))
+
+    address_str = ", ".join(parts)
+    pincode = (getattr(building, "pincode", "") or "").strip()
+    if pincode:
+        address_str = f"{address_str} - {pincode}" if address_str else pincode
+
+    return address_str or building_name or "-"
+
+
+def send_invoice_email(payment, is_retry=False, email_log=None, force=False):
     """
     Generates the commercial invoice PDF and emails it to the tenant's registered email.
     Records delivery status in BillingEmailLog.
+    Only commercial tenants receive invoices.
+    Idempotent by default unless force=True or is_retry=True.
     """
     tenant = payment.lease.tenant
     unit = payment.lease.unit
@@ -70,6 +171,32 @@ def send_invoice_email(payment, is_retry=False, email_log=None):
 
     billed_month = _get_billed_month(payment.due_date)
     subject = f"Commercial Rent Invoice - {unit.unit_number} - {billed_month}"
+
+    # Idempotency check: do not resend if already sent successfully unless force=True
+    if not is_retry and not force:
+        existing_sent = payment.email_logs.filter(
+            email_type="invoice",
+            status="sent",
+        ).first()
+        if existing_sent:
+            return existing_sent
+
+    # Business rule: Only commercial tenants receive invoices
+    if unit.unit_type != "commercial":
+        if email_log is None:
+            email_log = BillingEmailLog.objects.create(
+                payment=payment,
+                email_type="invoice",
+                recipient_email=recipient or "no-email-provided@rentease.local",
+                subject=subject,
+                status="failed",
+                error_message="Commercial invoices can only be generated and sent for commercial units.",
+            )
+        else:
+            email_log.status = "failed"
+            email_log.error_message = "Commercial invoices can only be generated and sent for commercial units."
+            email_log.save()
+        return email_log
 
     # Determine or create email log
     if email_log is None:
@@ -103,9 +230,16 @@ def send_invoice_email(payment, is_retry=False, email_log=None):
     calc = _calculate_gst_breakdown(payment.amount, tenant.gst_rate)
     due_date_str = payment.due_date.strftime("%d %b %Y")
     tenant_name = f"{tenant.first_name} {tenant.last_name}".strip() or "Valued Tenant"
+
     shop_name = tenant.shop_name or f"Unit {unit.unit_number}"
     landlord_name = building.landlord.user.get_full_name() or building.landlord.user.username
     business_name = inv_settings.business_name or landlord_name
+    building_address = format_building_address(building)
+
+    has_qr = bool(inv_settings and getattr(inv_settings, "upi_qr_code", None))
+    upi_id = getattr(inv_settings, "upi_id", "") or ""
+    upi_id_text = f"\nUPI ID: {upi_id}" if upi_id else ""
+    upi_qr_text = "\n[UPI QR Code attached - Scan with Google Pay, PhonePe, Paytm, or BHIM to pay]" if has_qr else ""
 
     # Plain text content
     text_content = f"""Dear {tenant_name},
@@ -115,6 +249,7 @@ Please find attached the official commercial rent invoice for {billed_month}.
 --- INVOICE SUMMARY ---
 Property: {building.name} - Unit {unit.unit_number} (Floor {floor.floor_number})
 Shop / Commercial Establishment: {shop_name}
+Building Address: {building_address}
 Billing Month: {billed_month}
 Due Date: {due_date_str}
 
@@ -131,7 +266,7 @@ TOTAL AMOUNT DUE: INR {calc['grand_total']:.2f}
 Bank: {inv_settings.bank_name or '-'}
 Account Number: {inv_settings.account_number or '-'}
 IFSC Code: {inv_settings.ifsc or '-'}
-Branch: {inv_settings.branch or '-'}
+Branch: {inv_settings.branch or '-'}{upi_id_text}{upi_qr_text}
 Instructions: {inv_settings.payment_instructions or 'Please include your unit number in the payment reference.'}
 
 Please ensure payment is completed on or before {due_date_str}.
@@ -140,6 +275,29 @@ The official tax invoice PDF is attached to this email.
 Warm regards,
 {business_name}
 Managed via RentEase
+"""
+
+    upi_qr_html = ""
+    if has_qr:
+        upi_id_badge = (
+            f'<p style="margin: 10px 0 0 0; font-size: 13px; color: #1e293b;"><strong>UPI ID:</strong> <span style="font-family: monospace; background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-weight: 600;">{upi_id}</span></p>'
+            if upi_id else ""
+        )
+        upi_qr_html = f"""
+      <div class="upi-card" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 24px 0; text-align: center;">
+        <h4 style="margin: 0 0 6px 0; color: #15803d; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Quick Pay via UPI</h4>
+        <p style="margin: 0 0 14px 0; font-size: 12.5px; color: #475569;">Scan the QR code below using Google Pay, PhonePe, Paytm or any UPI app</p>
+        <div style="display: inline-block; background: #ffffff; padding: 10px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.04);">
+          <img src="cid:upi_qr_code" alt="UPI Payment QR Code" style="width: 180px; height: 180px; object-fit: contain; display: block;" />
+        </div>
+        {upi_id_badge}
+      </div>
+"""
+    elif upi_id:
+        upi_qr_html = f"""
+      <div class="upi-card" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 14px 20px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #15803d;"><strong>Instant UPI Payment:</strong> <span style="font-family: monospace; background: #ffffff; padding: 2px 6px; border: 1px solid #bbf7d0; border-radius: 4px;">{upi_id}</span></p>
+      </div>
 """
 
     # Rich HTML content
@@ -157,8 +315,8 @@ Managed via RentEase
     .greeting {{ font-size: 15px; margin-bottom: 20px; }}
     .summary-card {{ background: #f1f5f9; border-radius: 8px; padding: 20px; margin-bottom: 24px; border-left: 4px solid #2563eb; }}
     .summary-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }}
-    .summary-label {{ color: #64748b; }}
-    .summary-value {{ font-weight: 600; color: #0f172a; }}
+    .summary-label {{ color: #64748b; flex-shrink: 0; margin-right: 12px; }}
+    .summary-value {{ font-weight: 600; color: #0f172a; text-align: right; }}
     .table {{ width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px; }}
     .table th {{ background: #f8fafc; color: #475569; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }}
     .table td {{ padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }}
@@ -186,6 +344,7 @@ Managed via RentEase
       <div class="summary-card">
         <div class="summary-row"><span class="summary-label">Commercial Unit:</span><span class="summary-value">Unit {unit.unit_number} ({shop_name})</span></div>
         <div class="summary-row"><span class="summary-label">Building / Floor:</span><span class="summary-value">{building.name}, Floor {floor.floor_number}</span></div>
+        <div class="summary-row"><span class="summary-label">Building Address:</span><span class="summary-value">{building_address}</span></div>
         <div class="summary-row"><span class="summary-label">Billing Month:</span><span class="summary-value">{billed_month}</span></div>
         <div class="summary-row"><span class="summary-label">Due Date:</span><span class="summary-value" style="color: #dc2626;">{due_date_str}</span></div>
       </div>
@@ -230,6 +389,8 @@ Managed via RentEase
         <p style="margin: 6px 0 0 0; color: #713f12;">{inv_settings.payment_instructions or 'Please mention your unit number in the transfer remarks.'}</p>
       </div>
 
+      {upi_qr_html}
+
       <p style="font-size: 12px; color: #64748b; font-style: italic;">
         * Note: The formal tax invoice document is attached to this email as a PDF.
       </p>
@@ -249,7 +410,7 @@ Managed via RentEase
         pdf_buffer = _invoice_pdf(payment, inv_settings, request=None)
         pdf_bytes = pdf_buffer.getvalue()
 
-        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "billing@rentease.com")
+        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "RentEase Billing <homrent1@gmail.com>")
         msg = EmailMultiAlternatives(
             subject=subject,
             body=text_content,
@@ -257,6 +418,7 @@ Managed via RentEase
             to=[recipient],
         )
         msg.attach_alternative(html_content, "text/html")
+        _attach_upi_qr_inline(msg, inv_settings)
         msg.attach(
             f"rent-invoice-{payment.id:06d}.pdf",
             pdf_bytes,
@@ -270,16 +432,18 @@ Managed via RentEase
         email_log.save()
     except Exception as exc:
         email_log.status = "failed"
-        email_log.error_message = str(exc)
+        email_log.error_message = _sanitize_and_format_email_error(exc)
         email_log.save()
 
     return email_log
 
 
-def send_receipt_email(payment, is_retry=False, email_log=None):
+def send_receipt_email(payment, is_retry=False, email_log=None, force=False):
     """
     Generates the payment receipt PDF and emails it to the tenant.
     Records delivery status in BillingEmailLog.
+    Only commercial tenants receive commercial payment receipts.
+    Idempotent by default unless force=True or is_retry=True.
     """
     tenant = payment.lease.tenant
     unit = payment.lease.unit
@@ -293,6 +457,32 @@ def send_receipt_email(payment, is_retry=False, email_log=None):
 
     txn_ref = payment.transaction_id or f"TXN-{payment.id:06d}"
     subject = f"Rent Payment Receipt - {unit.unit_number} - {txn_ref}"
+
+    # Idempotency check: do not resend if already sent successfully unless force=True
+    if not is_retry and not force:
+        existing_sent = payment.email_logs.filter(
+            email_type="receipt",
+            status="sent",
+        ).first()
+        if existing_sent:
+            return existing_sent
+
+    # Business rule: Residential tenants do NOT receive commercial receipts
+    if unit.unit_type != "commercial":
+        if email_log is None:
+            email_log = BillingEmailLog.objects.create(
+                payment=payment,
+                email_type="receipt",
+                recipient_email=recipient or "no-email-provided@rentease.local",
+                subject=subject,
+                status="failed",
+                error_message="Commercial payment receipts can only be emailed for commercial units.",
+            )
+        else:
+            email_log.status = "failed"
+            email_log.error_message = "Commercial payment receipts can only be emailed for commercial units."
+            email_log.save()
+        return email_log
 
     if email_log is None:
         email_log = BillingEmailLog.objects.create(
@@ -327,6 +517,7 @@ def send_receipt_email(payment, is_retry=False, email_log=None):
         email_log.save()
         return email_log
 
+
     calc = _calculate_gst_breakdown(payment.amount, tenant.gst_rate)
     paid_date = payment.paid_date or timezone.localdate()
     paid_date_str = paid_date.strftime("%d %b %Y")
@@ -336,6 +527,26 @@ def send_receipt_email(payment, is_retry=False, email_log=None):
     business_name = inv_settings.business_name or landlord_name
     payment_method_str = payment.get_payment_method_display() or payment.payment_method or "Direct Payment"
     billed_month = _get_billed_month(payment.due_date)
+    building_address = format_building_address(building)
+
+    has_qr = bool(inv_settings and getattr(inv_settings, "upi_qr_code", None))
+    upi_id = getattr(inv_settings, "upi_id", "") or ""
+
+    receipt_qr_html = ""
+    if has_qr:
+        upi_id_badge = (
+            f'<p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">UPI ID: <span style="font-family: monospace; font-weight: 600;">{upi_id}</span></p>'
+            if upi_id else ""
+        )
+        receipt_qr_html = f"""
+      <div class="upi-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0; text-align: center;">
+        <p style="margin: 0 0 10px 0; font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Landlord Official UPI QR</p>
+        <div style="display: inline-block; background: #ffffff; padding: 8px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <img src="cid:upi_qr_code" alt="UPI Payment QR Code" style="width: 140px; height: 140px; object-fit: contain; display: block;" />
+        </div>
+        {upi_id_badge}
+      </div>
+"""
 
     # Plain text content
     text_content = f"""Dear {tenant_name},
@@ -349,9 +560,8 @@ Payment Date: {paid_date_str}
 Payment Method: {payment_method_str}
 
 --- PROPERTY DETAILS ---
-Commercial Unit: Unit {unit.unit_number} (Floor {floor.floor_number})
 Shop / Office / Godown: {shop_name}
-Building: {building.name}
+Building Address: {building_address}
 Billing Period: {billed_month}
 
 --- PAYMENT BREAKDOWN ---
@@ -385,8 +595,8 @@ Managed via RentEase
     .paid-badge {{ display: inline-block; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 9999px; margin-bottom: 16px; }}
     .summary-card {{ background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 24px; border: 1px solid #e2e8f0; }}
     .summary-row {{ display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }}
-    .summary-label {{ color: #64748b; }}
-    .summary-value {{ font-weight: 600; color: #0f172a; }}
+    .summary-label {{ color: #64748b; flex-shrink: 0; margin-right: 12px; }}
+    .summary-value {{ font-weight: 600; color: #0f172a; text-align: right; }}
     .table {{ width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px; }}
     .table th {{ background: #f8fafc; color: #475569; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }}
     .table td {{ padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }}
@@ -411,7 +621,7 @@ Managed via RentEase
 
       <div class="summary-card">
         <div class="summary-row"><span class="summary-label">Shop / Office / Godown:</span><span class="summary-value">{shop_name}</span></div>
-        <div class="summary-row"><span class="summary-label">Unit / Building:</span><span class="summary-value">Unit {unit.unit_number}, {building.name}</span></div>
+        <div class="summary-row"><span class="summary-label">Building Address:</span><span class="summary-value">{building_address}</span></div>
         <div class="summary-row"><span class="summary-label">Payment Date:</span><span class="summary-value">{paid_date_str}</span></div>
         <div class="summary-row"><span class="summary-label">Payment Method:</span><span class="summary-value">{payment_method_str}</span></div>
         <div class="summary-row"><span class="summary-label">Transaction ID:</span><span class="summary-value" style="font-family: monospace;">{txn_ref}</span></div>
@@ -448,6 +658,8 @@ Managed via RentEase
         <div class="total-amount">&#8377;{calc['grand_total']:.2f}</div>
       </div>
 
+      {receipt_qr_html}
+
       <p style="font-size: 12px; color: #64748b; font-style: italic;">
         * An official PDF payment receipt is attached for your records and accounting.
       </p>
@@ -466,7 +678,7 @@ Managed via RentEase
         pdf_buffer = _receipt_pdf(payment, inv_settings, request=None)
         pdf_bytes = pdf_buffer.getvalue()
 
-        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "billing@rentease.com")
+        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "RentEase Billing <homrent1@gmail.com>")
         msg = EmailMultiAlternatives(
             subject=subject,
             body=text_content,
@@ -474,6 +686,7 @@ Managed via RentEase
             to=[recipient],
         )
         msg.attach_alternative(html_content, "text/html")
+        _attach_upi_qr_inline(msg, inv_settings)
         msg.attach(
             f"rent-receipt-{payment.id:06d}.pdf",
             pdf_bytes,
@@ -487,7 +700,7 @@ Managed via RentEase
         email_log.save()
     except Exception as exc:
         email_log.status = "failed"
-        email_log.error_message = str(exc)
+        email_log.error_message = _sanitize_and_format_email_error(exc)
         email_log.save()
 
     return email_log
@@ -636,3 +849,19 @@ def retry_failed_billing_emails(max_retries=3, payment_id=None, email_log_id=Non
         "succeeded": succeeded,
         "failed": failed,
     }
+
+
+def check_and_run_monthly_invoicing(building=None, landlord=None):
+    """
+    Automated check to generate commercial rent invoices on the 1st of the month
+    for all active commercial leases and email them to registered tenants.
+    Idempotent and safe against duplicate runs.
+    """
+    today = timezone.localdate()
+    return generate_monthly_invoices(
+        target_date=today,
+        building=building,
+        landlord=landlord,
+        send_emails=True,
+    )
+

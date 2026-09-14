@@ -127,6 +127,12 @@ class InvoiceSettings(models.Model):
         default="",
     )
 
+    upi_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+    )
+
     due_day = models.PositiveSmallIntegerField(
         default=7,
         help_text="Day of month (1-31) when the invoice is due.",
@@ -140,6 +146,12 @@ class InvoiceSettings(models.Model):
 
     signature = models.FileField(
         upload_to="invoice_assets/signatures/",
+        blank=True,
+        null=True,
+    )
+
+    upi_qr_code = models.FileField(
+        upload_to="invoice_assets/upi_qr/",
         blank=True,
         null=True,
     )

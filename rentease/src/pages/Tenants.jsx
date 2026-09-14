@@ -19,7 +19,7 @@ import {
 } from "../components/Icons";
 import "./Tenants.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 const EMPTY_PAYMENT_FORM = {
   amount: "",

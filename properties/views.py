@@ -495,7 +495,11 @@ class UnitViewSet(viewsets.ModelViewSet):
                 "You can only update your own units."
             )
 
-        serializer.save()
+        updated_unit = serializer.save()
+        active_lease = updated_unit.leases.filter(status="active").first()
+        if active_lease and active_lease.monthly_rent != updated_unit.monthly_rent:
+            active_lease.monthly_rent = updated_unit.monthly_rent
+            active_lease.save(update_fields=["monthly_rent"])
 
     def destroy(
         self,
@@ -1229,10 +1233,11 @@ class LeaseViewSet(viewsets.ModelViewSet):
 
             if lease.status == "active":
                 unit.status = "occupied"
-
+                unit.monthly_rent = lease.monthly_rent
                 unit.save(
                     update_fields=[
-                        "status"
+                        "status",
+                        "monthly_rent",
                     ]
                 )
 
@@ -1478,6 +1483,7 @@ class LeaseViewSet(viewsets.ModelViewSet):
         if lease.status == "active":
 
             new_unit.status = "occupied"
+            new_unit.monthly_rent = lease.monthly_rent
 
         elif not new_unit.leases.filter(
             status="active"
@@ -1487,7 +1493,8 @@ class LeaseViewSet(viewsets.ModelViewSet):
 
         new_unit.save(
             update_fields=[
-                "status"
+                "status",
+                "monthly_rent",
             ]
         )
 
@@ -1667,10 +1674,12 @@ class LeaseViewSet(viewsets.ModelViewSet):
         )
 
         unit.status = "occupied"
+        unit.monthly_rent = monthly_rent
 
         unit.save(
             update_fields=[
-                "status"
+                "status",
+                "monthly_rent",
             ]
         )
 
@@ -2268,6 +2277,8 @@ def _invoice_pdf(payment, settings, request):
         payment_details.append(f"IFSC: {_safe_text(settings.ifsc)}")
     if settings.branch:
         payment_details.append(f"Branch: {_safe_text(settings.branch)}")
+    if getattr(settings, "upi_id", None):
+        payment_details.append(f"UPI ID: {_safe_text(settings.upi_id)}")
     if settings.payment_instructions:
         payment_details.append(
             f"Instructions: {_safe_text(settings.payment_instructions)}"
@@ -2277,9 +2288,41 @@ def _invoice_pdf(payment, settings, request):
         story.append(
             Paragraph("PAYMENT DETAILS", styles["InvoiceSection"])
         )
-        story.append(
-            Paragraph("<br/>".join(payment_details), styles["InvoiceBody"])
-        )
+        if getattr(settings, "upi_qr_code", None):
+            try:
+                qr_img = Image(
+                    settings.upi_qr_code.path,
+                    width=28 * mm,
+                    height=28 * mm,
+                    kind="proportional",
+                )
+                qr_block = [
+                    Paragraph("<b>Scan & Pay via UPI</b>", styles["InvoiceBody"]),
+                    Spacer(1, 1 * mm),
+                    qr_img,
+                ]
+                pay_table = Table(
+                    [
+                        [
+                            Paragraph("<br/>".join(payment_details), styles["InvoiceBody"]),
+                            qr_block,
+                        ]
+                    ],
+                    colWidths=[125 * mm, 55 * mm],
+                )
+                pay_table.setStyle(TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ]))
+                story.append(pay_table)
+            except Exception:
+                story.append(
+                    Paragraph("<br/>".join(payment_details), styles["InvoiceBody"])
+                )
+        else:
+            story.append(
+                Paragraph("<br/>".join(payment_details), styles["InvoiceBody"])
+            )
         story.append(Spacer(1, 4 * mm))
 
     # Larger stacked signature block. The surrounding invoice is compact
@@ -2869,7 +2912,13 @@ class PaymentViewSet(
                 "Invoice email is currently available for rent payments only."
             )
 
-        email_log = send_invoice_email(payment)
+        if payment.lease.unit.unit_type != "commercial":
+            raise ValidationError(
+                "Commercial invoices can only be emailed for commercial units."
+            )
+
+        force = request.data.get("force", False)
+        email_log = send_invoice_email(payment, force=force)
         serializer = self.get_serializer(payment)
         status_code = (
             status.HTTP_200_OK
@@ -2913,12 +2962,18 @@ class PaymentViewSet(
                 "Receipt email is currently available for rent payments only."
             )
 
+        if payment.lease.unit.unit_type != "commercial":
+            raise ValidationError(
+                "Commercial receipts can only be emailed for commercial units."
+            )
+
         if payment.status != "paid":
             raise ValidationError(
                 "A payment receipt can only be sent after the rent is marked as paid."
             )
 
-        email_log = send_receipt_email(payment)
+        force = request.data.get("force", False)
+        email_log = send_receipt_email(payment, force=force)
         serializer = self.get_serializer(payment)
         status_code = (
             status.HTTP_200_OK
@@ -3108,7 +3163,16 @@ class PaymentViewSet(
 
         payment = serializer.save()
         if payment.payment_type == "rent" and payment.status == "paid":
-            send_receipt_email(payment)
+            if payment.lease.unit.unit_type == "commercial":
+                try:
+                    already_sent = payment.email_logs.filter(
+                        email_type="receipt",
+                        status="sent",
+                    ).exists()
+                    if not already_sent:
+                        send_receipt_email(payment)
+                except Exception:
+                    pass
 
     def perform_update(
         self,
@@ -3138,12 +3202,16 @@ class PaymentViewSet(
         updated_payment = serializer.save()
 
         if updated_payment.payment_type == "rent" and updated_payment.status == "paid":
-            already_sent = updated_payment.email_logs.filter(
-                email_type="receipt",
-                status="sent",
-            ).exists()
-            if old_status != "paid" or not already_sent:
-                send_receipt_email(updated_payment)
+            if updated_payment.lease.unit.unit_type == "commercial":
+                already_sent = updated_payment.email_logs.filter(
+                    email_type="receipt",
+                    status="sent",
+                ).exists()
+                if old_status != "paid" and not already_sent:
+                    try:
+                        send_receipt_email(updated_payment)
+                    except Exception:
+                        pass
 
     def destroy(
         self,

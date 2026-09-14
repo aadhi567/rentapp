@@ -13,8 +13,7 @@ import { PlusIcon } from "../components/Icons";
 import "./Leases.css";
 
 
-const API_URL =
-  "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 
 function Leases() {
@@ -1022,6 +1021,12 @@ function Leases() {
         }
         if (!tenantForm.postal_address.trim()) {
           return "Postal Address is required for commercial units.";
+        }
+        if (!tenantForm.email.trim()) {
+          return "Email Address is required for commercial tenants to receive invoices and receipts.";
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(tenantForm.email.trim())) {
+          return "Please enter a valid email address.";
         }
         if (
           tenantForm.gst_rate === "" ||

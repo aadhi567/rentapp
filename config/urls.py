@@ -1,16 +1,21 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
 )
 
 from properties.auth_views import (
     RegisterView,
     CurrentUserView,
+    RentEaseTokenObtainPairView,
+    LandlordLoginView,
+    CheckEmailView,
+    GoogleLoginView,
+    SystemAccountsView,
 )
 
 
@@ -29,6 +34,24 @@ urlpatterns = [
 
     # Authentication
     path(
+        "api/auth/system-accounts/",
+        SystemAccountsView.as_view(),
+        name="system_accounts",
+    ),
+
+    path(
+        "api/auth/check-email/",
+        CheckEmailView.as_view(),
+        name="check_email",
+    ),
+
+    path(
+        "api/auth/google/",
+        GoogleLoginView.as_view(),
+        name="google_login",
+    ),
+
+    path(
         "api/auth/register/",
         RegisterView.as_view(),
         name="register",
@@ -36,8 +59,14 @@ urlpatterns = [
 
     path(
         "api/auth/login/",
-        TokenObtainPairView.as_view(),
+        RentEaseTokenObtainPairView.as_view(),
         name="token_obtain_pair",
+    ),
+
+    path(
+        "api/auth/landlord-login/",
+        LandlordLoginView.as_view(),
+        name="landlord_login",
     ),
 
     path(
@@ -54,9 +83,13 @@ urlpatterns = [
 ]
 
 
-# Serve uploaded files during development
+# Serve uploaded media files
 if settings.DEBUG:
     urlpatterns += static(
         settings.MEDIA_URL,
         document_root=settings.MEDIA_ROOT,
     )
+else:
+    urlpatterns += [
+        re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+    ]

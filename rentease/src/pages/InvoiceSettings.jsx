@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import LandlordLayout from "../components/LandlordLayout";
 import "./InvoiceSettings.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 const EMPTY_FORM = {
   business_name: "",
@@ -19,6 +19,7 @@ const EMPTY_FORM = {
   ifsc: "",
   branch: "",
   payment_instructions: "",
+  upi_id: "",
 };
 
 function InvoiceSettings() {
@@ -29,8 +30,10 @@ function InvoiceSettings() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [logoFile, setLogoFile] = useState(null);
   const [signatureFile, setSignatureFile] = useState(null);
+  const [upiQrFile, setUpiQrFile] = useState(null);
   const [logoUrl, setLogoUrl] = useState(null);
   const [signatureUrl, setSignatureUrl] = useState(null);
+  const [upiQrUrl, setUpiQrUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -101,9 +104,11 @@ function InvoiceSettings() {
           ifsc: record.ifsc || "",
           branch: record.branch || "",
           payment_instructions: record.payment_instructions || "",
+          upi_id: record.upi_id || "",
         });
         setLogoUrl(record.logo_url || null);
         setSignatureUrl(record.signature_url || null);
+        setUpiQrUrl(record.upi_qr_code_url || null);
       }
     } catch (err) {
       setError(err.message || "Unable to load invoice settings.");
@@ -143,7 +148,12 @@ function InvoiceSettings() {
 
   const handleFileChange = (event, type) => {
     const file = event.target.files?.[0] || null;
-    const label = type === "logo" ? "Logo" : "Signature";
+    const label =
+      type === "logo"
+        ? "Logo"
+        : type === "signature"
+        ? "Signature"
+        : "UPI QR Code";
     const validationError = validateFile(file, label);
 
     setError(validationError || "");
@@ -153,10 +163,15 @@ function InvoiceSettings() {
     if (type === "logo") {
       setLogoFile(file);
       setLogoUrl(file ? URL.createObjectURL(file) : logoUrl);
-    } else {
+    } else if (type === "signature") {
       setSignatureFile(file);
       setSignatureUrl(
         file ? URL.createObjectURL(file) : signatureUrl
+      );
+    } else if (type === "upi_qr") {
+      setUpiQrFile(file);
+      setUpiQrUrl(
+        file ? URL.createObjectURL(file) : upiQrUrl
       );
     }
   };
@@ -176,6 +191,7 @@ function InvoiceSettings() {
 
       if (logoFile) body.append("logo", logoFile);
       if (signatureFile) body.append("signature", signatureFile);
+      if (upiQrFile) body.append("upi_qr_code", upiQrFile);
 
       const isUpdate = Boolean(settingsId);
       const url = isUpdate
@@ -208,8 +224,10 @@ function InvoiceSettings() {
       setSettingsId(data.id);
       setLogoUrl(data.logo_url || logoUrl);
       setSignatureUrl(data.signature_url || signatureUrl);
+      setUpiQrUrl(data.upi_qr_code_url || upiQrUrl);
       setLogoFile(null);
       setSignatureFile(null);
+      setUpiQrFile(null);
       setMessage("Invoice settings saved successfully.");
     } catch (err) {
       setError(err.message || "Unable to save invoice settings.");
@@ -392,6 +410,34 @@ function InvoiceSettings() {
                 />
               </label>
             </div>
+
+            <div className="invoice-asset-box">
+              <div className="invoice-asset-preview upi-qr-preview">
+                {upiQrUrl ? (
+                  <img
+                    src={upiQrUrl}
+                    alt="UPI Payment QR Code preview"
+                    style={{ maxHeight: "90%", maxWidth: "90%", objectFit: "contain" }}
+                  />
+                ) : (
+                  <span>UPI QR</span>
+                )}
+              </div>
+
+              <h3>UPI Payment QR Code</h3>
+              <p>Displayed in billing emails so tenants can scan and pay with any UPI app.</p>
+
+              <label className="invoice-upload-button">
+                Choose QR image
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) =>
+                    handleFileChange(event, "upi_qr")
+                  }
+                />
+              </label>
+            </div>
           </div>
         </section>
 
@@ -437,6 +483,16 @@ function InvoiceSettings() {
                 name="branch"
                 value={form.branch}
                 onChange={handleChange}
+              />
+            </label>
+
+            <label>
+              UPI ID (VPA)
+              <input
+                name="upi_id"
+                value={form.upi_id}
+                onChange={handleChange}
+                placeholder="e.g. merchant@okhdfcbank"
               />
             </label>
 

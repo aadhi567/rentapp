@@ -13,7 +13,7 @@ import {
 } from "../components/Icons";
 import "./LandlordDashboard.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 function LandlordDashboard() {
   const navigate = useNavigate();

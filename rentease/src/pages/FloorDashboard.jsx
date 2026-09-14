@@ -13,10 +13,12 @@ import {
   TrashIcon,
   CloseIcon,
   LayersIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "../components/Icons";
 import "./FloorDashboard.css";
 
-const API_URL = "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 function FloorDashboard() {
   const { id } = useParams();
@@ -68,15 +70,34 @@ function FloorDashboard() {
     });
   };
 
+  const [buildingsAnalytics, setBuildingsAnalytics] = useState([]);
+  const [activeBuildingIndex, setActiveBuildingIndex] = useState(0);
+
   const loadFloorData = async () => {
     setLoading(true);
     setError("");
 
     try {
-      const floorResponse = await authenticatedFetch(`${API_URL}/floors/${id}/`);
-      if (!floorResponse) return;
+      const [
+        floorResponse,
+        unitsResponse,
+        buildingsResponse,
+        floorsResponse,
+        paymentsResponse,
+      ] = await Promise.all([
+        authenticatedFetch(`${API_URL}/floors/${id}/`),
+        authenticatedFetch(`${API_URL}/units/`),
+        authenticatedFetch(`${API_URL}/buildings/`),
+        authenticatedFetch(`${API_URL}/floors/`),
+        authenticatedFetch(`${API_URL}/payments/`),
+      ]);
 
-      if (floorResponse.status === 401) {
+      if (!floorResponse || !unitsResponse) return;
+
+      if (
+        floorResponse.status === 401 ||
+        unitsResponse.status === 401
+      ) {
         logout();
         return;
       }
@@ -87,24 +108,98 @@ function FloorDashboard() {
       }
       setFloor(floorData);
 
-      const unitsResponse = await authenticatedFetch(`${API_URL}/units/`);
-      if (!unitsResponse) return;
-
-      if (unitsResponse.status === 401) {
-        logout();
-        return;
-      }
-
-      const unitsData = await unitsResponse.json();
-      if (!unitsResponse.ok) {
-        throw new Error(unitsData.detail || "Unable to load units.");
-      }
-
-      const floorUnits = Array.isArray(unitsData)
-        ? unitsData.filter((unit) => Number(unit.floor) === Number(id))
+      const allUnitsData = unitsResponse.ok ? await unitsResponse.json() : [];
+      const floorUnits = Array.isArray(allUnitsData)
+        ? allUnitsData.filter((unit) => Number(unit.floor) === Number(id))
         : [];
-
       setUnits(floorUnits);
+
+      const allBuildingsData =
+        buildingsResponse && buildingsResponse.ok
+          ? await buildingsResponse.json()
+          : [];
+      const allFloorsData =
+        floorsResponse && floorsResponse.ok
+          ? await floorsResponse.json()
+          : [];
+      const allPaymentsData =
+        paymentsResponse && paymentsResponse.ok
+          ? await paymentsResponse.json()
+          : [];
+
+      // Calculate rent collection analytics per building and per floor:
+      const analytics = (Array.isArray(allBuildingsData) ? allBuildingsData : []).map(
+        (b) => {
+          const bFloors = (Array.isArray(allFloorsData) ? allFloorsData : [])
+            .filter((f) => Number(f.building) === Number(b.id))
+            .sort((f1, f2) => Number(f1.floor_number) - Number(f2.floor_number));
+
+          const floorList = bFloors.map((f) => {
+            const fUnits = (Array.isArray(allUnitsData) ? allUnitsData : []).filter(
+              (u) => Number(u.floor) === Number(f.id)
+            );
+            const expectedRent = fUnits.reduce(
+              (sum, u) => sum + Number(u.monthly_rent || 0),
+              0
+            );
+
+            const fPayments = (
+              Array.isArray(allPaymentsData) ? allPaymentsData : []
+            ).filter((p) => {
+              const matchesBuilding = Number(p.building_id) === Number(b.id);
+              const matchesFloor = Number(p.floor_number) === Number(f.floor_number);
+              const isPaidRent =
+                p.status === "paid" && p.payment_type === "rent";
+              return matchesBuilding && matchesFloor && isPaidRent;
+            });
+
+            const collectedRent = fPayments.reduce(
+              (sum, p) => sum + Number(p.amount || 0),
+              0
+            );
+
+            return {
+              floorId: f.id,
+              floorNumber: f.floor_number,
+              unitCount: fUnits.length,
+              expectedRent,
+              collectedRent,
+              isCurrent: Number(f.id) === Number(id),
+            };
+          });
+
+          const totalCollected = floorList.reduce(
+            (sum, f) => sum + f.collectedRent,
+            0
+          );
+          const totalExpected = floorList.reduce(
+            (sum, f) => sum + f.expectedRent,
+            0
+          );
+
+          return {
+            buildingId: b.id,
+            buildingName: b.name,
+            floors: floorList,
+            totalCollected,
+            totalExpected,
+            collectionRate:
+              totalExpected > 0
+                ? Math.round((totalCollected / totalExpected) * 100)
+                : 0,
+          };
+        }
+      );
+
+      setBuildingsAnalytics(analytics);
+
+      // Default slider to current floor's building
+      const currentBIdx = analytics.findIndex(
+        (b) => Number(b.buildingId) === Number(floorData.building)
+      );
+      if (currentBIdx >= 0) {
+        setActiveBuildingIndex(currentBIdx);
+      }
     } catch (err) {
       console.error("Floor load error:", err);
       setError(err.message || "Unable to load floor information.");
@@ -160,6 +255,25 @@ function FloorDashboard() {
       commercial,
     };
   }, [units]);
+
+  const selectedBuilding =
+    buildingsAnalytics.length > 0
+      ? buildingsAnalytics[activeBuildingIndex] || buildingsAnalytics[0]
+      : null;
+
+  const handlePrevBuilding = () => {
+    if (buildingsAnalytics.length <= 1) return;
+    setActiveBuildingIndex((prev) =>
+      prev > 0 ? prev - 1 : buildingsAnalytics.length - 1
+    );
+  };
+
+  const handleNextBuilding = () => {
+    if (buildingsAnalytics.length <= 1) return;
+    setActiveBuildingIndex((prev) =>
+      prev < buildingsAnalytics.length - 1 ? prev + 1 : 0
+    );
+  };
 
   const resetForm = () => {
     setForm({
@@ -564,49 +678,132 @@ function FloorDashboard() {
 
       {/* OVERVIEW SECTION: OCCUPANCY & UNIT MIX */}
       <section className="floor-overview-row">
-        {/* Occupancy Card */}
-        <div className="floor-card">
+        {/* Rent Collection by Floor Card with Building Slider */}
+        <div className="floor-card floor-chart-card">
           <div className="floor-card-top">
             <div>
-              <span className="floor-card-tag">OCCUPANCY STATUS</span>
-              <h3 className="floor-card-heading">Floor Utilization</h3>
+              <span className="floor-card-tag">RENT COLLECTION</span>
+              <h3 className="floor-card-heading">Rent Collected by Floor</h3>
             </div>
-            <div className="floor-rate-badge">
-              <span>{stats.occupancy}%</span>
-            </div>
+
+            {/* Building Slider Controls */}
+            {buildingsAnalytics.length > 0 && (
+              <div className="building-slider-controls">
+                <button
+                  type="button"
+                  className="slider-nav-btn"
+                  onClick={handlePrevBuilding}
+                  disabled={buildingsAnalytics.length <= 1}
+                  title="Previous building"
+                  aria-label="Previous building"
+                >
+                  <ChevronLeftIcon size={16} />
+                </button>
+                <div
+                  className="slider-building-badge"
+                  title={`Building ${activeBuildingIndex + 1} of ${buildingsAnalytics.length}`}
+                >
+                  <BuildingIcon size={14} />
+                  <span className="slider-building-name">
+                    {selectedBuilding?.buildingName || "Building"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="slider-nav-btn"
+                  onClick={handleNextBuilding}
+                  disabled={buildingsAnalytics.length <= 1}
+                  title="Next building"
+                  aria-label="Next building"
+                >
+                  <ChevronRightIcon size={16} />
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="floor-progress-container">
-            <div className="floor-progress-track">
-              <div
-                className="floor-progress-fill occupied"
-                style={{ width: `${stats.occupancy}%` }}
-                title={`Occupied: ${stats.occupancy}%`}
-              />
-              <div
-                className="floor-progress-fill maintenance"
-                style={{ width: `${stats.maintenancePct}%` }}
-                title={`Maintenance: ${stats.maintenancePct}%`}
-              />
-            </div>
-          </div>
+          {/* Bar Graph */}
+          {selectedBuilding && selectedBuilding.floors.length > 0 ? (
+            <div className="floor-bars-wrapper">
+              <div className="floor-bars-grid">
+                {selectedBuilding.floors.map((f) => {
+                  const maxAmount = Math.max(
+                    ...selectedBuilding.floors.map((fl) =>
+                      Math.max(Number(fl.collectedRent || 0), Number(fl.expectedRent || 0))
+                    ),
+                    1000
+                  );
+                  const collectedPct = Math.round(
+                    (Number(f.collectedRent || 0) / maxAmount) * 100
+                  );
+                  const heightStyle = `${Math.max(collectedPct, f.collectedRent > 0 ? 12 : 6)}%`;
 
-          <div className="floor-legend-row">
-            <div className="legend-item">
-              <span className="legend-dot green"></span>
-              <span className="legend-label">Occupied</span>
-              <strong className="legend-count">{stats.occupied}</strong>
+                  return (
+                    <div
+                      key={f.floorId}
+                      className={`floor-bar-col ${f.isCurrent ? "current-floor" : ""} ${f.collectedRent === 0 ? "has-zero" : ""}`}
+                    >
+                      <div className="bar-collected-label">
+                        ₹{Number(f.collectedRent).toLocaleString("en-IN")}
+                      </div>
+
+                      <div className="bar-track-area">
+                        <div
+                          className={`bar-fill ${f.collectedRent > 0 ? "has-rent" : "no-rent"}`}
+                          style={{ height: heightStyle }}
+                          title={`Floor ${f.floorNumber}: ₹${Number(f.collectedRent).toLocaleString("en-IN")} collected of ₹${Number(f.expectedRent).toLocaleString("en-IN")} total`}
+                        />
+                      </div>
+
+                      <div className="bar-floor-info">
+                        <span className="bar-floor-number">Floor {f.floorNumber}</span>
+                        {f.isCurrent && (
+                          <span className="current-floor-indicator">Current</span>
+                        )}
+                        <span className="bar-expected-sub">
+                          ₹{Number(f.expectedRent).toLocaleString("en-IN")} exp.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div className="legend-item">
-              <span className="legend-dot blue"></span>
-              <span className="legend-label">Vacant</span>
-              <strong className="legend-count">{stats.vacant}</strong>
+          ) : (
+            <div className="floor-chart-empty">
+              <span>No floor data available for this building.</span>
             </div>
-            <div className="legend-item">
-              <span className="legend-dot amber"></span>
-              <span className="legend-label">Maintenance</span>
-              <strong className="legend-count">{stats.maintenance}</strong>
+          )}
+
+          {/* Card Footer: Building Totals & Dots */}
+          <div className="floor-chart-footer">
+            <div className="chart-totals-info">
+              <span className="totals-collected">
+                Total Collected:{" "}
+                <strong>
+                  ₹{Number(selectedBuilding?.totalCollected || 0).toLocaleString("en-IN")}
+                </strong>
+              </span>
+              <span className="totals-rate">
+                ({selectedBuilding?.collectionRate || 0}% of ₹
+                {Number(selectedBuilding?.totalExpected || 0).toLocaleString("en-IN")})
+              </span>
             </div>
+
+            {buildingsAnalytics.length > 1 && (
+              <div className="slider-dots">
+                {buildingsAnalytics.map((b, idx) => (
+                  <button
+                    key={b.buildingId}
+                    type="button"
+                    className={`slider-dot ${idx === activeBuildingIndex ? "active" : ""}`}
+                    onClick={() => setActiveBuildingIndex(idx)}
+                    title={`View ${b.buildingName}`}
+                    aria-label={`View ${b.buildingName}`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -13,8 +13,7 @@ import { PlusIcon, MailIcon } from "../components/Icons";
 import "./Payments.css";
 
 
-const API_URL =
-  "http://127.0.0.1:8000/api";
+import { API_URL } from "../api";
 
 
 const initialForm = {
@@ -241,13 +240,16 @@ function Payments() {
       }
     };
 
-  const handleSendInvoice = async (paymentId) => {
+  const handleSendInvoice = async (paymentId, force = false) => {
     setActionLoading((prev) => ({ ...prev, [paymentId]: true }));
     setNotice(null);
     try {
       const response = await authenticatedFetch(
         `${API_URL}/payments/${paymentId}/send-invoice/`,
-        { method: "POST" }
+        {
+          method: "POST",
+          body: JSON.stringify({ force }),
+        }
       );
       if (!response) return;
       const data = await response.json();
@@ -267,13 +269,16 @@ function Payments() {
     }
   };
 
-  const handleSendReceipt = async (paymentId) => {
+  const handleSendReceipt = async (paymentId, force = false) => {
     setActionLoading((prev) => ({ ...prev, [paymentId]: true }));
     setNotice(null);
     try {
       const response = await authenticatedFetch(
         `${API_URL}/payments/${paymentId}/send-receipt/`,
-        { method: "POST" }
+        {
+          method: "POST",
+          body: JSON.stringify({ force }),
+        }
       );
       if (!response) return;
       const data = await response.json();
@@ -1281,7 +1286,7 @@ function Payments() {
 
                       <td>
                         <div className="payment-delivery-col">
-                          {payment.payment_type === "rent" ? (
+                          {payment.payment_type === "rent" && payment.unit_type === "commercial" ? (
                             <>
                               <div className="delivery-badge-row">
                                 <span className="delivery-type-label">Inv:</span>
@@ -1373,6 +1378,7 @@ function Payments() {
 
                         <div className="payment-actions">
                           {payment.payment_type === "rent" &&
+                            payment.unit_type === "commercial" &&
                             ["pending", "paid", "overdue"].includes(payment.status) && (
                               <>
                                 <button
@@ -1387,7 +1393,12 @@ function Payments() {
                                 <button
                                   type="button"
                                   className="payment-email-action-btn invoice"
-                                  onClick={() => handleSendInvoice(payment.id)}
+                                  onClick={() =>
+                                    handleSendInvoice(
+                                      payment.id,
+                                      payment.latest_invoice_email?.status === "sent"
+                                    )
+                                  }
                                   disabled={actionLoading[payment.id]}
                                   title={payment.latest_invoice_email?.status === "sent" ? "Resend invoice email" : "Email invoice PDF to tenant"}
                                 >
@@ -1401,6 +1412,7 @@ function Payments() {
                             )}
 
                           {payment.payment_type === "rent" &&
+                            payment.unit_type === "commercial" &&
                             payment.status === "paid" && (
                               <>
                                 <button
@@ -1415,7 +1427,12 @@ function Payments() {
                                 <button
                                   type="button"
                                   className="payment-email-action-btn receipt"
-                                  onClick={() => handleSendReceipt(payment.id)}
+                                  onClick={() =>
+                                    handleSendReceipt(
+                                      payment.id,
+                                      payment.latest_receipt_email?.status === "sent"
+                                    )
+                                  }
                                   disabled={actionLoading[payment.id]}
                                   title={payment.latest_receipt_email?.status === "sent" ? "Resend receipt email" : "Email receipt PDF to tenant"}
                                 >
