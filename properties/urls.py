@@ -12,11 +12,18 @@ from .views import (
     PaymentViewSet,
     MaintenanceRequestViewSet,
     BillingEmailLogViewSet,
+    AnalyticsViewSet,
 )
 
 
 
 router = DefaultRouter()
+
+router.register(
+    r"analytics",
+    AnalyticsViewSet,
+    basename="analytics",
+)
 
 router.register(
     r"buildings",

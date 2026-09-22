@@ -14,6 +14,15 @@ import "./Leases.css";
 
 
 import { API_URL } from "../api";
+import {
+  sanitizeAlpha,
+  sanitizeNumeric,
+  sanitizeDecimal,
+  sanitizeCode,
+  isValidPhone,
+  isValidGSTIN,
+  preventNumberSpill,
+} from "../utils/validators";
 
 
 function Leases() {
@@ -787,13 +796,18 @@ function Leases() {
     }
 
 
+    let sanitizedValue = value;
+    if (name === "monthly_rent" || name === "security_deposit") {
+      sanitizedValue = sanitizeDecimal(value);
+    }
+
     setForm(
       (
         previous
       ) => ({
         ...previous,
         [name]:
-          value,
+          sanitizedValue,
       })
     );
   };
@@ -809,6 +823,16 @@ function Leases() {
         value,
       } = event.target;
 
+      let sanitizedValue = value;
+      if (name === "first_name" || name === "last_name" || name === "emergency_contact") {
+        sanitizedValue = sanitizeAlpha(value, 50);
+      } else if (name === "phone" || name === "emergency_phone") {
+        sanitizedValue = sanitizeNumeric(value, 10);
+      } else if (name === "gst_number") {
+        sanitizedValue = sanitizeCode(value, 15);
+      } else if (name === "gst_rate") {
+        sanitizedValue = sanitizeDecimal(value);
+      }
 
       setTenantForm(
         (
@@ -816,7 +840,7 @@ function Leases() {
         ) => ({
           ...previous,
           [name]:
-            value,
+            sanitizedValue,
         })
       );
     };
@@ -904,6 +928,11 @@ function Leases() {
     value
   ) => {
 
+    let sanitizedValue = value;
+    if (field === "days_before") {
+      sanitizedValue = sanitizeNumeric(value, 4);
+    }
+
     setReminders(
       (
         previous
@@ -918,12 +947,7 @@ function Leases() {
               ? {
                   ...reminder,
                   [field]:
-                    field ===
-                    "days_before"
-                      ? Number(
-                          value
-                        )
-                      : value,
+                    sanitizedValue,
                 }
               : reminder
         )
@@ -1010,6 +1034,14 @@ function Leases() {
         ) < 0
       ) {
         return "Enter a valid security deposit.";
+      }
+
+      if (tenantForm.phone && !isValidPhone(tenantForm.phone)) {
+        return "Tenant phone number must be a valid 10-digit mobile number.";
+      }
+
+      if (tenantForm.emergency_phone && !isValidPhone(tenantForm.emergency_phone)) {
+        return "Emergency phone number must be a valid 10-digit mobile number.";
       }
 
       if (isCommercialUnit) {
@@ -3154,6 +3186,7 @@ function Leases() {
                   onChange={
                     handleChange
                   }
+                  onKeyDown={preventNumberSpill}
                   disabled={
                     saving
                   }
@@ -3180,6 +3213,7 @@ function Leases() {
                   onChange={
                     handleChange
                   }
+                  onKeyDown={preventNumberSpill}
                   disabled={
                     saving
                   }
@@ -3289,6 +3323,7 @@ function Leases() {
                               .value
                           )
                         }
+                        onKeyDown={preventNumberSpill}
                         disabled={
                           saving
                         }

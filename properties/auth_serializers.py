@@ -1,3 +1,4 @@
+import re
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User, update_last_login
 from django.db import transaction
@@ -60,6 +61,50 @@ class RegisterSerializer(serializers.Serializer):
         required=False,
         allow_blank=True
     )
+
+    def validate_first_name(self, value):
+        value = (value or "").strip()
+        if len(value) < 2:
+            raise serializers.ValidationError(
+                "First name must be at least 2 characters long."
+            )
+        if not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError(
+                "First name can only contain letters, spaces, and hyphens."
+            )
+        return value
+
+    def validate_last_name(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError(
+                "Last name can only contain letters, spaces, and hyphens."
+            )
+        return value
+
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^\+?[0-9]{10,15}$", value):
+            raise serializers.ValidationError(
+                "Phone number must contain 10 to 15 digits only."
+            )
+        return value
+
+    def validate_emergency_contact(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError(
+                "Emergency contact name can only contain letters, spaces, and hyphens."
+            )
+        return value
+
+    def validate_emergency_phone(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^\+?[0-9]{10,15}$", value):
+            raise serializers.ValidationError(
+                "Emergency phone number must contain 10 to 15 digits only."
+            )
+        return value
 
     def validate_username(self, value):
         if not value:

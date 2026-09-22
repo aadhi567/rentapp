@@ -12,6 +12,11 @@ import {
 import "./Signup.css";
 
 import { API_URL } from "../api";
+import {
+  sanitizeAlpha,
+  sanitizeNumeric,
+  isValidPhone,
+} from "../utils/validators";
 
 function Signup() {
   const navigate = useNavigate();
@@ -37,9 +42,17 @@ function Signup() {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
+    let sanitizedValue = value;
+
+    if (name === "first_name" || name === "last_name" || name === "emergency_contact") {
+      sanitizedValue = sanitizeAlpha(value, 50);
+    } else if (name === "phone" || name === "emergency_phone") {
+      sanitizedValue = sanitizeNumeric(value, 10);
+    }
+
     setForm((previous) => ({
       ...previous,
-      [name]: value,
+      [name]: sanitizedValue,
     }));
   };
 
@@ -53,6 +66,21 @@ function Signup() {
     event.preventDefault();
     setError("");
     setSuccess("");
+
+    if (form.first_name.trim().length < 2) {
+      setError("First name must contain at least 2 letters.");
+      return;
+    }
+
+    if (form.phone && form.phone.trim().length !== 10) {
+      setError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+
+    if (role === "tenant" && form.emergency_phone && form.emergency_phone.trim().length !== 10) {
+      setError("Emergency contact phone number must be 10 digits.");
+      return;
+    }
 
     if (form.password !== form.confirm_password) {
       setError("Passwords do not match.");
@@ -192,6 +220,7 @@ function Signup() {
                   onChange={handleChange}
                   placeholder="e.g. John"
                   autoComplete="given-name"
+                  maxLength={50}
                   disabled={loading}
                   required
                 />
@@ -207,6 +236,7 @@ function Signup() {
                   onChange={handleChange}
                   placeholder="e.g. Doe"
                   autoComplete="family-name"
+                  maxLength={50}
                   disabled={loading}
                   required
                 />
@@ -236,9 +266,11 @@ function Signup() {
                   id="phone"
                   name="phone"
                   type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
                   value={form.phone}
                   onChange={handleChange}
-                  placeholder="e.g. 9876543210"
+                  placeholder="10-digit mobile number"
                   autoComplete="tel"
                   disabled={loading}
                 />
@@ -323,7 +355,8 @@ function Signup() {
                       type="text"
                       value={form.emergency_contact}
                       onChange={handleChange}
-                      placeholder="Emergency contact person"
+                      placeholder="Letters only"
+                      maxLength={50}
                       disabled={loading}
                     />
                   </div>
@@ -334,9 +367,11 @@ function Signup() {
                       id="emergency_phone"
                       name="emergency_phone"
                       type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
                       value={form.emergency_phone}
                       onChange={handleChange}
-                      placeholder="Emergency phone number"
+                      placeholder="10-digit mobile number"
                       disabled={loading}
                     />
                   </div>

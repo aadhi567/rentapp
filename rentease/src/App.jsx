@@ -17,6 +17,8 @@ import FloorDashboard from "./pages/FloorDashboard";
 import Tenants from "./pages/Tenants";
 import Leases from "./pages/Leases";
 import Payments from "./pages/Payments";
+import Reminders from "./pages/Reminders";
+import Analytics from "./pages/Analytics";
 
 import TenantDashboard from "./pages/TenantDashboard";
 import InvoiceSettings from "./pages/InvoiceSettings";
@@ -153,24 +155,12 @@ function App() {
 
         <Route
           path="/landlord/analytics"
-          element={
-            <PagePlaceholder
-              title="Property Analytics"
-              icon={<AnalyticsIcon size={30} />}
-              description="Interactive yield graphs, occupancy timeline trends, vacancy loss reports, and multi-building revenue benchmarks."
-            />
-          }
+          element={<Analytics />}
         />
 
         <Route
           path="/landlord/reminders"
-          element={
-            <PagePlaceholder
-              title="Automated Reminders"
-              icon={<ReminderIcon size={30} />}
-              description="Automated WhatsApp, SMS, and email payment reminders, grace period notices, and upcoming lease renewal alerts."
-            />
-          }
+          element={<Reminders />}
         />
 
         <Route

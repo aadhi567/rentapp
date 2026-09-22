@@ -14,6 +14,11 @@ import "./Payments.css";
 
 
 import { API_URL } from "../api";
+import {
+  sanitizeDecimal,
+  sanitizeAlphanumeric,
+  preventNumberSpill,
+} from "../utils/validators";
 
 
 const initialForm = {
@@ -558,6 +563,12 @@ function Payments() {
         value,
       } = event.target;
 
+      let sanitizedValue = value;
+      if (name === "amount") {
+        sanitizedValue = sanitizeDecimal(value);
+      } else if (name === "transaction_id") {
+        sanitizedValue = sanitizeAlphanumeric(value, 50);
+      }
 
       setForm(
         (
@@ -565,7 +576,7 @@ function Payments() {
         ) => ({
           ...previous,
           [name]:
-            value,
+            sanitizedValue,
         })
       );
     };
@@ -1675,6 +1686,7 @@ function Payments() {
                   onChange={
                     handleChange
                   }
+                  onKeyDown={preventNumberSpill}
                   placeholder="18000"
                   disabled={
                     saving

@@ -4,6 +4,15 @@ import LandlordLayout from "../components/LandlordLayout";
 import "./InvoiceSettings.css";
 
 import { API_URL } from "../api";
+import {
+  sanitizeAlpha,
+  sanitizeNumeric,
+  sanitizeCode,
+  isValidPhone,
+  isValidPincode,
+  isValidIFSC,
+  isValidGSTIN,
+} from "../utils/validators";
 
 const EMPTY_FORM = {
   business_name: "",
@@ -123,7 +132,23 @@ function InvoiceSettings() {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
-    setForm((previous) => ({ ...previous, [name]: value }));
+    let sanitizedValue = value;
+
+    if (name === "city" || name === "state" || name === "bank_name" || name === "branch") {
+      sanitizedValue = sanitizeAlpha(value, 50);
+    } else if (name === "pincode") {
+      sanitizedValue = sanitizeNumeric(value, 6);
+    } else if (name === "phone") {
+      sanitizedValue = sanitizeNumeric(value, 10);
+    } else if (name === "account_number") {
+      sanitizedValue = sanitizeNumeric(value, 18);
+    } else if (name === "ifsc") {
+      sanitizedValue = sanitizeCode(value, 11);
+    } else if (name === "gstin") {
+      sanitizedValue = sanitizeCode(value, 15);
+    }
+
+    setForm((previous) => ({ ...previous, [name]: sanitizedValue }));
   };
 
   const validateFile = (file, label) => {
@@ -178,9 +203,35 @@ function InvoiceSettings() {
 
   const saveSettings = async (event) => {
     event.preventDefault();
-    setSaving(true);
     setError("");
     setMessage("");
+
+    if (form.pincode && !isValidPincode(form.pincode)) {
+      setError("Pincode must be exactly 6 digits.");
+      return;
+    }
+
+    if (form.phone && !isValidPhone(form.phone)) {
+      setError("Phone number must be a valid 10-digit mobile number.");
+      return;
+    }
+
+    if (form.account_number && (form.account_number.length < 9 || form.account_number.length > 18)) {
+      setError("Account number must be between 9 and 18 digits.");
+      return;
+    }
+
+    if (form.ifsc && !isValidIFSC(form.ifsc)) {
+      setError("Please enter a valid 11-character IFSC code (e.g. HDFC0001234).");
+      return;
+    }
+
+    if (form.gstin && !isValidGSTIN(form.gstin)) {
+      setError("Please enter a valid 15-character GSTIN number.");
+      return;
+    }
+
+    setSaving(true);
 
     try {
       const body = new FormData();

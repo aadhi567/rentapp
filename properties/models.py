@@ -807,6 +807,8 @@ class BillingEmailLog(models.Model):
     EMAIL_TYPES = [
         ("invoice", "Commercial Invoice"),
         ("receipt", "Payment Receipt"),
+        ("reminder", "Payment Reminder"),
+        ("lease_renewal", "Lease Renewal Notice"),
     ]
 
     EMAIL_STATUS = [
@@ -818,6 +820,16 @@ class BillingEmailLog(models.Model):
     payment = models.ForeignKey(
         Payment,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="email_logs",
+    )
+
+    lease = models.ForeignKey(
+        Lease,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="email_logs",
     )
 

@@ -19,6 +19,11 @@ import {
 import "./FloorDashboard.css";
 
 import { API_URL } from "../api";
+import {
+  sanitizeDecimal,
+  sanitizeNumeric,
+  preventNumberSpill,
+} from "../utils/validators";
 
 function FloorDashboard() {
   const { id } = useParams();
@@ -289,9 +294,17 @@ function FloorDashboard() {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
+    let sanitizedValue = value;
+
+    if (name === "monthly_rent") {
+      sanitizedValue = sanitizeDecimal(value);
+    } else if (name === "area") {
+      sanitizedValue = sanitizeNumeric(value, 6);
+    }
+
     setForm((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: sanitizedValue,
     }));
   };
 
@@ -1116,7 +1129,7 @@ function FloorDashboard() {
                   <label htmlFor="monthly_rent">
                     Monthly Rent (₹) <span className="req">*</span>
                   </label>
-                  <div className="input-with-affix">
+                  <div className="input-with-affix has-prefix">
                     <span className="input-affix">₹</span>
                     <input
                       id="monthly_rent"
@@ -1125,6 +1138,7 @@ function FloorDashboard() {
                       name="monthly_rent"
                       value={form.monthly_rent}
                       onChange={handleChange}
+                      onKeyDown={preventNumberSpill}
                       placeholder="15000"
                       disabled={saving}
                       required
@@ -1136,7 +1150,7 @@ function FloorDashboard() {
                   <label htmlFor="area">
                     Area (sq.ft) <span className="req">*</span>
                   </label>
-                  <div className="input-with-affix">
+                  <div className="input-with-affix has-suffix">
                     <input
                       id="area"
                       type="number"
@@ -1144,6 +1158,7 @@ function FloorDashboard() {
                       name="area"
                       value={form.area}
                       onChange={handleChange}
+                      onKeyDown={preventNumberSpill}
                       placeholder="850"
                       disabled={saving}
                       required

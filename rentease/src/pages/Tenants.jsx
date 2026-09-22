@@ -20,6 +20,11 @@ import {
 import "./Tenants.css";
 
 import { API_URL } from "../api";
+import {
+  sanitizeDecimal,
+  sanitizeAlphanumeric,
+  preventNumberSpill,
+} from "../utils/validators";
 
 const EMPTY_PAYMENT_FORM = {
   amount: "",
@@ -533,7 +538,13 @@ function Tenants() {
 
   const handlePaymentChange = (event) => {
     const { name, value } = event.target;
-    setPaymentForm((prev) => ({ ...prev, [name]: value }));
+    let sanitizedValue = value;
+    if (name === "amount") {
+      sanitizedValue = sanitizeDecimal(value);
+    } else if (name === "transaction_id") {
+      sanitizedValue = sanitizeAlphanumeric(value, 50);
+    }
+    setPaymentForm((prev) => ({ ...prev, [name]: sanitizedValue }));
   };
 
   const savePayment = async (event) => {
@@ -1353,10 +1364,12 @@ function Tenants() {
                 <label>Payment Amount (₹)</label>
                 <input
                   type="number"
+                  min="0.01"
                   step="0.01"
                   name="amount"
                   value={paymentForm.amount}
                   onChange={handlePaymentChange}
+                  onKeyDown={preventNumberSpill}
                   placeholder="e.g. 15000"
                   required
                 />

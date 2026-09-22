@@ -5,6 +5,16 @@ import { BuildingIcon, PlusIcon } from "../components/Icons";
 import "./Buildings.css";
 
 import { API_URL } from "../api";
+import {
+  sanitizeAlpha,
+  sanitizeNumeric,
+  sanitizeCode,
+  isValidPhone,
+  isValidPincode,
+  isValidIFSC,
+  isValidGSTIN,
+  preventNumberSpill,
+} from "../utils/validators";
 
 function Buildings() {
   const navigate = useNavigate();
@@ -331,15 +341,12 @@ function Buildings() {
 
     let sanitizedValue = value;
 
-    // Building form validation:
-    // City and State must not contain numbers.
-    // Pincode must contain digits only and be at most 6 digits.
     if (name === "city" || name === "state") {
-      sanitizedValue = value.replace(/[^A-Za-z\s.'-]/g, "");
-    }
-
-    if (name === "pincode") {
-      sanitizedValue = value.replace(/\D/g, "").slice(0, 6);
+      sanitizedValue = sanitizeAlpha(value, 50);
+    } else if (name === "pincode") {
+      sanitizedValue = sanitizeNumeric(value, 6);
+    } else if (name === "number_of_floors") {
+      sanitizedValue = value === "" ? "" : Math.max(1, parseInt(sanitizeNumeric(value, 3), 10) || 1);
     }
 
     setForm((previous) => ({
@@ -406,7 +413,7 @@ function Buildings() {
       return;
     }
 
-    if (!/^[A-Za-z\\s.'-]+$/.test(form.city.trim())) {
+    if (!/^[A-Za-z\s.'-]+$/.test(form.city.trim())) {
       setError(
         "City can contain letters, spaces, periods, apostrophes and hyphens only."
       );
@@ -420,14 +427,14 @@ function Buildings() {
       return;
     }
 
-    if (!/^[A-Za-z\\s.'-]+$/.test(form.state.trim())) {
+    if (!/^[A-Za-z\s.'-]+$/.test(form.state.trim())) {
       setError(
         "State can contain letters, spaces, periods, apostrophes and hyphens only."
       );
       return;
     }
 
-    if (!/^\\d{6}$/.test(form.pincode.trim())) {
+    if (!/^\d{6}$/.test(form.pincode.trim())) {
       setError(
         "Pincode must contain exactly 6 digits."
       );
@@ -560,7 +567,7 @@ function Buildings() {
       return;
     }
 
-    if (!/^[A-Za-z\\s.'-]+$/.test(form.city.trim())) {
+    if (!/^[A-Za-z\s.'-]+$/.test(form.city.trim())) {
       setError(
         "City can contain letters, spaces, periods, apostrophes and hyphens only."
       );
@@ -574,14 +581,14 @@ function Buildings() {
       return;
     }
 
-    if (!/^[A-Za-z\\s.'-]+$/.test(form.state.trim())) {
+    if (!/^[A-Za-z\s.'-]+$/.test(form.state.trim())) {
       setError(
         "State can contain letters, spaces, periods, apostrophes and hyphens only."
       );
       return;
     }
 
-    if (!/^\\d{6}$/.test(form.pincode.trim())) {
+    if (!/^\d{6}$/.test(form.pincode.trim())) {
       setError(
         "Pincode must contain exactly 6 digits."
       );
@@ -828,12 +835,34 @@ function Buildings() {
   const handleInvoiceTemplateChange = (event) => {
     const { name, value, files, type } = event.target;
 
+    if (type === "file") {
+      setInvoiceTemplate((previous) => ({
+        ...previous,
+        [name]: files?.[0] || null,
+      }));
+      return;
+    }
+
+    let sanitizedValue = value;
+    if (name === "city" || name === "state" || name === "bank_name" || name === "branch") {
+      sanitizedValue = sanitizeAlpha(value, 50);
+    } else if (name === "pincode") {
+      sanitizedValue = sanitizeNumeric(value, 6);
+    } else if (name === "phone") {
+      sanitizedValue = sanitizeNumeric(value, 10);
+    } else if (name === "account_number") {
+      sanitizedValue = sanitizeNumeric(value, 18);
+    } else if (name === "ifsc") {
+      sanitizedValue = sanitizeCode(value, 11);
+    } else if (name === "gstin") {
+      sanitizedValue = sanitizeCode(value, 15);
+    } else if (name === "due_day") {
+      sanitizedValue = sanitizeNumeric(value, 2);
+    }
+
     setInvoiceTemplate((previous) => ({
       ...previous,
-      [name]:
-        type === "file"
-          ? files?.[0] || null
-          : value,
+      [name]: sanitizedValue,
     }));
   };
 
@@ -945,6 +974,31 @@ function Buildings() {
       setInvoiceTemplateError(
         "Invoice due day must be a whole number between 1 and 31."
       );
+      return;
+    }
+
+    if (invoiceTemplate.pincode && !isValidPincode(invoiceTemplate.pincode)) {
+      setInvoiceTemplateError("Pincode must be exactly 6 digits.");
+      return;
+    }
+
+    if (invoiceTemplate.phone && !isValidPhone(invoiceTemplate.phone)) {
+      setInvoiceTemplateError("Phone number must be a valid 10-digit mobile number.");
+      return;
+    }
+
+    if (invoiceTemplate.account_number && (invoiceTemplate.account_number.length < 9 || invoiceTemplate.account_number.length > 18)) {
+      setInvoiceTemplateError("Account number must be between 9 and 18 digits.");
+      return;
+    }
+
+    if (invoiceTemplate.ifsc && !isValidIFSC(invoiceTemplate.ifsc)) {
+      setInvoiceTemplateError("Please enter a valid 11-character IFSC code (e.g. HDFC0001234).");
+      return;
+    }
+
+    if (invoiceTemplate.gstin && !isValidGSTIN(invoiceTemplate.gstin)) {
+      setInvoiceTemplateError("Please enter a valid 15-character GSTIN number.");
       return;
     }
 
@@ -1588,11 +1642,13 @@ function Buildings() {
                 <input
                   type="number"
                   min="1"
+                  max="150"
                   name="number_of_floors"
                   value={
                     form.number_of_floors
                   }
                   onChange={handleChange}
+                  onKeyDown={preventNumberSpill}
                   disabled={saving}
                   required
                 />
@@ -2128,6 +2184,7 @@ function Buildings() {
                     onChange={
                       handleInvoiceTemplateChange
                     }
+                    onKeyDown={preventNumberSpill}
                     disabled={
                       invoiceTemplateSaving
                     }

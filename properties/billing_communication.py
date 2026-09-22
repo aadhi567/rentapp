@@ -706,6 +706,345 @@ Managed via RentEase
     return email_log
 
 
+def send_rent_reminder_email(payment, custom_note="", is_retry=False, email_log=None, force=False):
+    """
+    Sends an automated rent payment reminder email to the tenant (residential or commercial).
+    Includes unit, amount, due date, status (Due soon / Overdue), bank details, and UPI QR code.
+    Records delivery in BillingEmailLog.
+    """
+    tenant = payment.lease.tenant
+    unit = payment.lease.unit
+    floor = unit.floor
+    building = floor.building
+    inv_settings = resolve_invoice_settings(payment)
+
+    recipient = (tenant.email or "").strip()
+    if not recipient and tenant.user and tenant.user.email:
+        recipient = tenant.user.email.strip()
+
+    today = timezone.localdate()
+    is_overdue = payment.due_date < today
+    is_due_today = payment.due_date == today
+    days_diff = abs((today - payment.due_date).days)
+
+    if is_overdue:
+        urgency_label = f"Overdue by {days_diff} days"
+        status_theme_color = "#dc2626"
+        status_bg = "#fef2f2"
+        subject = f"Urgent Reminder: Rent Overdue - Unit {unit.name} ({building.name}) - INR {payment.amount:.2f}"
+    elif is_due_today:
+        urgency_label = "Due Today"
+        status_theme_color = "#d97706"
+        status_bg = "#fffbeb"
+        subject = f"Rent Due Today - Unit {unit.name} ({building.name}) - INR {payment.amount:.2f}"
+    else:
+        urgency_label = f"Due in {days_diff} days"
+        status_theme_color = "#2563eb"
+        status_bg = "#eff6ff"
+        subject = f"Payment Reminder: Rent for Unit {unit.name} ({building.name}) - INR {payment.amount:.2f}"
+
+    if email_log is None:
+        email_log = BillingEmailLog.objects.create(
+            payment=payment,
+            lease=payment.lease,
+            email_type="reminder",
+            recipient_email=recipient or "no-email-provided@rentease.local",
+            subject=subject,
+            status="pending",
+        )
+    else:
+        email_log.recipient_email = recipient or email_log.recipient_email
+        email_log.subject = subject
+
+    if is_retry:
+        email_log.retry_count += 1
+
+    if not recipient:
+        email_log.status = "failed"
+        email_log.error_message = "Tenant has no registered email address."
+        email_log.save()
+        return email_log
+
+    due_date_str = payment.due_date.strftime("%d %b %Y")
+    tenant_name = f"{tenant.first_name} {tenant.last_name}".strip() or "Valued Tenant"
+    landlord_name = building.landlord.user.get_full_name() or building.landlord.user.username
+    business_name = (inv_settings.business_name if inv_settings and inv_settings.business_name else None) or landlord_name
+    building_address = format_building_address(building)
+
+    bank_info = ""
+    bank_html = ""
+    if inv_settings and inv_settings.bank_name and inv_settings.account_number:
+        bank_info = f"""
+Bank Transfer Details:
+Bank: {inv_settings.bank_name}
+Account No: {inv_settings.account_number}
+IFSC: {inv_settings.ifsc or 'N/A'}
+Branch: {inv_settings.branch or 'N/A'}
+"""
+        bank_html = f"""
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 16px 0;">
+          <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #475569; text-transform: uppercase;">Bank Transfer Details</h4>
+          <div style="font-size: 13px; line-height: 1.6; color: #1e293b;">
+            <strong>Bank:</strong> {inv_settings.bank_name}<br/>
+            <strong>Account Number:</strong> {inv_settings.account_number}<br/>
+            <strong>IFSC Code:</strong> {inv_settings.ifsc or 'N/A'}<br/>
+            <strong>Branch:</strong> {inv_settings.branch or 'N/A'}
+          </div>
+        </div>
+        """
+
+    upi_qr_html = ""
+    has_qr = bool(inv_settings and getattr(inv_settings, "upi_qr_code", None))
+    upi_id = getattr(inv_settings, "upi_id", "") if inv_settings else ""
+    if has_qr:
+        upi_id_badge = f'<p style="margin: 8px 0 0 0; font-size: 13px; font-weight: 600; color: #1e293b;">UPI ID: <span style="color: #2563eb;">{upi_id}</span></p>' if upi_id else ""
+        upi_qr_html = f"""
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 14px; margin: 16px 0; text-align: center;">
+          <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 700; color: #166534; text-transform: uppercase;">Instant UPI Payment</p>
+          <div style="display: inline-block; background: #ffffff; padding: 6px; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <img src="cid:upi_qr_code" alt="UPI QR Code" style="width: 130px; height: 130px; object-fit: contain; display: block;" />
+          </div>
+          {upi_id_badge}
+        </div>
+        """
+
+    custom_note_section = ""
+    if custom_note:
+        custom_note_section = f"""
+        <div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 8px; padding: 14px; margin: 16px 0; font-size: 13px; color: #713f12;">
+          <strong>Note from Landlord:</strong> {custom_note}
+        </div>
+        """
+
+    text_content = f"""Dear {tenant_name},
+
+This is a rent payment reminder from {business_name}.
+
+--- PAYMENT SUMMARY ---
+Property: {building.name} - Unit {unit.name} (Floor {floor.floor_number})
+Address: {building_address}
+Due Date: {due_date_str} ({urgency_label})
+Total Amount Due: INR {payment.amount:.2f}
+
+{custom_note if custom_note else ''}
+{bank_info}
+{f'UPI ID: {upi_id}' if upi_id else ''}
+
+Please ensure prompt payment to avoid late fees or disruptions.
+
+Thank you,
+{business_name}
+Managed via RentEase
+"""
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f8fafc; margin: 0; padding: 24px; }}
+    .container {{ max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+    .header {{ background: #0f172a; padding: 24px 28px; color: #ffffff; }}
+    .header h1 {{ margin: 0 0 4px 0; font-size: 19px; font-weight: 700; }}
+    .content {{ padding: 28px; }}
+    .status-badge {{ display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; color: {status_theme_color}; background: {status_bg}; margin-bottom: 16px; border: 1px solid {status_theme_color}33; }}
+    .card {{ background: #f8fafc; border-radius: 8px; padding: 16px; margin: 18px 0; border: 1px solid #e2e8f0; }}
+    .row {{ display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }}
+    .total-banner {{ background: {status_bg}; border: 1px solid {status_theme_color}44; border-radius: 8px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; margin: 18px 0; }}
+    .footer {{ background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 28px; font-size: 12px; color: #64748b; text-align: center; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Rent Payment Reminder</h1>
+      <p style="margin: 0; font-size: 13px; color: #94a3b8;">{business_name} &bull; RentEase</p>
+    </div>
+    <div class="content">
+      <span class="status-badge">{urgency_label.upper()}</span>
+      <p style="font-size: 15px; margin: 0 0 14px 0;">Dear <strong>{tenant_name}</strong>,</p>
+      <p style="font-size: 13.5px; line-height: 1.5; color: #334155; margin: 0 0 14px 0;">
+        This is a friendly reminder regarding your upcoming or pending rent payment for <strong>Unit {unit.name}</strong> at <strong>{building.name}</strong>.
+      </p>
+
+      <div class="card">
+        <div class="row"><span>Property:</span><strong>{building.name}</strong></div>
+        <div class="row"><span>Unit:</span><strong>Unit {unit.name} (Floor {floor.floor_number})</strong></div>
+        <div class="row"><span>Due Date:</span><strong style="color: {status_theme_color};">{due_date_str}</strong></div>
+        <div class="row"><span>Status:</span><strong style="color: {status_theme_color};">{urgency_label}</strong></div>
+      </div>
+
+      <div class="total-banner">
+        <span style="font-size: 14px; font-weight: 600; color: #1e293b;">Total Payable:</span>
+        <span style="font-size: 22px; font-weight: 800; color: {status_theme_color};">&#8377;{payment.amount:.2f}</span>
+      </div>
+
+      {custom_note_section}
+      {bank_html}
+      {upi_qr_html}
+
+      <p style="font-size: 12.5px; color: #64748b; line-height: 1.5; margin-top: 20px;">
+        If you have already made this payment, please disregard this reminder. You can also share the payment reference or transaction receipt with us directly.
+      </p>
+    </div>
+    <div class="footer">
+      Sent by {business_name} via RentEase &bull; Automated Property Management
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+    try:
+        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "RentEase Billing <homrent1@gmail.com>")
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=from_email,
+            to=[recipient],
+        )
+        msg.attach_alternative(html_content, "text/html")
+        _attach_upi_qr_inline(msg, inv_settings)
+        msg.send(fail_silently=False)
+
+        email_log.status = "sent"
+        email_log.sent_at = timezone.now()
+        email_log.error_message = ""
+        email_log.save()
+    except Exception as exc:
+        email_log.status = "failed"
+        email_log.error_message = _sanitize_and_format_email_error(exc)
+        email_log.save()
+
+    return email_log
+
+
+def send_lease_expiry_email(lease, custom_note="", is_retry=False, force=False):
+    """
+    Sends a lease renewal / expiry notification to the tenant.
+    """
+    tenant = lease.tenant
+    unit = lease.unit
+    building = unit.floor.building
+    inv_settings = resolve_invoice_settings(lease.payments.first()) if lease.payments.exists() else None
+
+    recipient = (tenant.email or "").strip()
+    if not recipient and tenant.user and tenant.user.email:
+        recipient = tenant.user.email.strip()
+
+    today = timezone.localdate()
+    days_remaining = (lease.end_date - today).days if lease.end_date else 0
+    end_date_str = lease.end_date.strftime("%d %b %Y") if lease.end_date else "N/A"
+
+    subject = f"Lease Renewal Notice: Unit {unit.name} ({building.name}) - Ending {end_date_str}"
+
+    email_log = BillingEmailLog.objects.create(
+        lease=lease,
+        email_type="lease_renewal",
+        recipient_email=recipient or "no-email-provided@rentease.local",
+        subject=subject,
+        status="pending",
+    )
+
+    if not recipient:
+        email_log.status = "failed"
+        email_log.error_message = "Tenant has no registered email address."
+        email_log.save()
+        return email_log
+
+    tenant_name = f"{tenant.first_name} {tenant.last_name}".strip() or "Valued Tenant"
+    landlord_name = building.landlord.user.get_full_name() or building.landlord.user.username
+    business_name = (inv_settings.business_name if inv_settings and inv_settings.business_name else None) or landlord_name
+
+    text_content = f"""Dear {tenant_name},
+
+This is an important notice regarding your lease agreement for Unit {unit.name} at {building.name}.
+
+Your current lease is scheduled to end on {end_date_str} ({days_remaining} days remaining).
+
+Current Monthly Rent: INR {lease.monthly_rent:.2f}
+
+{f"Landlord Note: {custom_note}" if custom_note else ""}
+
+If you wish to renew your lease or discuss renewal terms, please reach out to us at your earliest convenience.
+
+Best regards,
+{business_name}
+Managed via RentEase
+"""
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; margin: 0; padding: 24px; }}
+    .container {{ max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }}
+    .header {{ background: #0f172a; padding: 24px 28px; color: #ffffff; }}
+    .content {{ padding: 28px; }}
+    .badge {{ display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; color: #b45309; background: #fef3c7; margin-bottom: 16px; border: 1px solid #fde68a; }}
+    .card {{ background: #f8fafc; border-radius: 8px; padding: 16px; margin: 18px 0; border: 1px solid #e2e8f0; }}
+    .row {{ display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }}
+    .footer {{ background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 28px; font-size: 12px; color: #64748b; text-align: center; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin:0; font-size:19px;">Lease Renewal Notice</h1>
+      <p style="margin:4px 0 0 0; font-size:13px; color:#94a3b8;">{business_name} &bull; RentEase</p>
+    </div>
+    <div class="content">
+      <span class="badge">EXPIRES IN {days_remaining} DAYS</span>
+      <p style="font-size:15px; margin:0 0 14px 0;">Dear <strong>{tenant_name}</strong>,</p>
+      <p style="font-size:13.5px; line-height:1.5; color:#334155;">
+        Your current lease agreement for <strong>Unit {unit.name}</strong> at <strong>{building.name}</strong> is approaching its expiration date on <strong>{end_date_str}</strong>.
+      </p>
+
+      <div class="card">
+        <div class="row"><span>Property:</span><strong>{building.name}</strong></div>
+        <div class="row"><span>Unit:</span><strong>Unit {unit.name}</strong></div>
+        <div class="row"><span>Lease End Date:</span><strong style="color: #b45309;">{end_date_str}</strong></div>
+        <div class="row"><span>Monthly Rent:</span><strong>&#8377;{lease.monthly_rent:.2f}</strong></div>
+      </div>
+
+      {f'<div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 8px; padding: 14px; margin: 16px 0; font-size: 13px;"><strong>Landlord Note:</strong> {custom_note}</div>' if custom_note else ''}
+
+      <p style="font-size:13.5px; line-height:1.5; color:#334155;">
+        We value your tenancy! If you are interested in renewing your lease or would like to discuss lease terms, please contact management as soon as possible.
+      </p>
+    </div>
+    <div class="footer">
+      Sent by {business_name} via RentEase
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+    try:
+        from_email = getattr(django_settings, "DEFAULT_FROM_EMAIL", "RentEase Billing <homrent1@gmail.com>")
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=from_email,
+            to=[recipient],
+        )
+        msg.attach_alternative(html_content, "text/html")
+        msg.send(fail_silently=False)
+
+        email_log.status = "sent"
+        email_log.sent_at = timezone.now()
+        email_log.error_message = ""
+        email_log.save()
+    except Exception as exc:
+        email_log.status = "failed"
+        email_log.error_message = _sanitize_and_format_email_error(exc)
+        email_log.save()
+
+    return email_log
+
+
 def generate_monthly_invoices(target_date=None, building=None, landlord=None, send_emails=True):
     """
     Automatically generates commercial rent invoices on the 1st of the month

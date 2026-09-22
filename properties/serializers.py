@@ -1,3 +1,5 @@
+import re
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
@@ -97,12 +99,50 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
                     field: "File size must be 5 MB or smaller."
                 })
 
+        for name_field in ("city", "state", "bank_name", "branch"):
+            val = attrs.get(name_field, getattr(self.instance, name_field, ""))
+            if val and not re.match(r"^[a-zA-Z\s\-']+$", val.strip()):
+                raise serializers.ValidationError({
+                    name_field: f"{name_field.replace('_', ' ').capitalize()} can only contain letters, spaces, and hyphens."
+                })
+
+        pincode = attrs.get("pincode", getattr(self.instance, "pincode", ""))
+        if pincode and not re.match(r"^\d{6}$", pincode.strip()):
+            raise serializers.ValidationError({
+                "pincode": "Pincode must contain exactly 6 digits."
+            })
+
+        phone = attrs.get("phone", getattr(self.instance, "phone", ""))
+        if phone and not re.match(r"^\+?[0-9]{10,15}$", phone.strip()):
+            raise serializers.ValidationError({
+                "phone": "Phone number must contain 10 to 15 digits."
+            })
+
+        account_number = attrs.get("account_number", getattr(self.instance, "account_number", ""))
+        if account_number and not re.match(r"^\d{9,18}$", account_number.strip()):
+            raise serializers.ValidationError({
+                "account_number": "Account number must contain 9 to 18 digits only."
+            })
+
+        ifsc = attrs.get("ifsc", getattr(self.instance, "ifsc", ""))
+        if ifsc and not re.match(r"^[A-Z]{4}0[A-Z0-9]{6}$", ifsc.strip().upper()):
+            raise serializers.ValidationError({
+                "ifsc": "Invalid IFSC code format (e.g. HDFC0001234)."
+            })
+
+        gstin = attrs.get("gstin", getattr(self.instance, "gstin", ""))
+        if gstin and not re.match(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$", gstin.strip().upper()):
+            if len(gstin.strip()) != 15:
+                raise serializers.ValidationError({
+                    "gstin": "GSTIN must contain 15 alphanumeric characters."
+                })
+
         due_day = attrs.get(
             "due_day",
             getattr(self.instance, "due_day", 7),
         )
 
-        if due_day < 1 or due_day > 31:
+        if due_day is not None and (due_day < 1 or due_day > 31):
             raise serializers.ValidationError({
                 "due_day": "Due day must be between 1 and 31."
             })
@@ -137,6 +177,29 @@ class BuildingSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate_city(self, value):
+        value = (value or "").strip()
+        if not value or not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError("City can only contain letters, spaces, and hyphens.")
+        return value
+
+    def validate_state(self, value):
+        value = (value or "").strip()
+        if not value or not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError("State can only contain letters, spaces, and hyphens.")
+        return value
+
+    def validate_pincode(self, value):
+        value = (value or "").strip()
+        if not re.match(r"^\d{6}$", value):
+            raise serializers.ValidationError("Pincode must contain exactly 6 digits.")
+        return value
+
+    def validate_number_of_floors(self, value):
+        if value is None or value < 1:
+            raise serializers.ValidationError("Number of floors must be at least 1.")
+        return value
 
 
 class FloorSerializer(serializers.ModelSerializer):
@@ -251,6 +314,16 @@ class UnitSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def validate_monthly_rent(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Monthly rent cannot be negative.")
+        return value
+
+    def validate_area(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Area cannot be negative.")
+        return value
+
 
 class TenantSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -294,6 +367,36 @@ class TenantSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate_first_name(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError("First name can only contain letters, spaces, and hyphens.")
+        return value
+
+    def validate_last_name(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError("Last name can only contain letters, spaces, and hyphens.")
+        return value
+
+    def validate_phone(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^\+?[0-9]{10,15}$", value):
+            raise serializers.ValidationError("Phone number must contain 10 to 15 digits only.")
+        return value
+
+    def validate_emergency_contact(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^[a-zA-Z\s\-']+$", value):
+            raise serializers.ValidationError("Emergency contact name can only contain letters, spaces, and hyphens.")
+        return value
+
+    def validate_emergency_phone(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^\+?[0-9]{10,15}$", value):
+            raise serializers.ValidationError("Emergency phone number must contain 10 to 15 digits only.")
+        return value
 
     def validate_email(self, value):
         if value:
@@ -406,6 +509,15 @@ class TenantSerializer(serializers.ModelSerializer):
 class LeaseReminderSerializer(
     serializers.ModelSerializer
 ):
+    tenant_name = serializers.SerializerMethodField()
+    tenant_phone = serializers.SerializerMethodField()
+    tenant_email = serializers.SerializerMethodField()
+    unit_name = serializers.SerializerMethodField()
+    building_name = serializers.SerializerMethodField()
+    lease_end_date = serializers.SerializerMethodField()
+    monthly_rent = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
+
     class Meta:
         model = LeaseReminder
         fields = [
@@ -416,13 +528,73 @@ class LeaseReminderSerializer(
             "sent",
             "sent_at",
             "created_at",
+            "tenant_name",
+            "tenant_phone",
+            "tenant_email",
+            "unit_name",
+            "building_name",
+            "lease_end_date",
+            "monthly_rent",
+            "days_remaining",
         ]
         read_only_fields = [
             "id",
             "sent",
             "sent_at",
             "created_at",
+            "tenant_name",
+            "tenant_phone",
+            "tenant_email",
+            "unit_name",
+            "building_name",
+            "lease_end_date",
+            "monthly_rent",
+            "days_remaining",
         ]
+
+    def get_tenant_name(self, obj):
+        if obj.lease and obj.lease.tenant:
+            t = obj.lease.tenant
+            name = f"{t.first_name} {t.last_name}".strip()
+            return name or (t.user.get_full_name() if t.user else "Tenant")
+        return "Unknown"
+
+    def get_tenant_phone(self, obj):
+        if obj.lease and obj.lease.tenant:
+            return obj.lease.tenant.phone or ""
+        return ""
+
+    def get_tenant_email(self, obj):
+        if obj.lease and obj.lease.tenant:
+            t = obj.lease.tenant
+            return t.email or (t.user.email if t.user else "")
+        return ""
+
+    def get_unit_name(self, obj):
+        if obj.lease and obj.lease.unit:
+            return obj.lease.unit.name
+        return ""
+
+    def get_building_name(self, obj):
+        if obj.lease and obj.lease.unit and obj.lease.unit.floor and obj.lease.unit.floor.building:
+            return obj.lease.unit.floor.building.name
+        return ""
+
+    def get_lease_end_date(self, obj):
+        if obj.lease and obj.lease.end_date:
+            return obj.lease.end_date.isoformat()
+        return None
+
+    def get_monthly_rent(self, obj):
+        if obj.lease:
+            return float(obj.lease.monthly_rent)
+        return 0.0
+
+    def get_days_remaining(self, obj):
+        if obj.lease and obj.lease.end_date:
+            today = timezone.localdate()
+            return (obj.lease.end_date - today).days
+        return None
 
     def validate_days_before(self, value):
         if value <= 0:
@@ -1003,6 +1175,7 @@ class BillingEmailLogSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "payment",
+            "lease",
             "email_type",
             "email_type_display",
             "recipient_email",

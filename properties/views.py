@@ -1,3 +1,4 @@
+import datetime
 import json
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
@@ -6,7 +7,7 @@ from pathlib import Path
 from rest_framework.decorators import action
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum, Count, Avg
 from django.utils.dateparse import parse_date
 from django.http import FileResponse
 from django.utils import timezone
@@ -68,6 +69,8 @@ from .serializers import (
 from .billing_communication import (
     send_invoice_email,
     send_receipt_email,
+    send_rent_reminder_email,
+    send_lease_expiry_email,
     generate_monthly_invoices,
     retry_failed_billing_emails,
 )
@@ -1740,6 +1743,42 @@ class LeaseViewSet(viewsets.ModelViewSet):
 
         return response
 
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="send-renewal-notice",
+    )
+    def send_renewal_notice(self, request, pk=None):
+        user = request.user
+        lease = self.get_object()
+
+        is_landlord = (
+            hasattr(user, "landlord_profile")
+            and lease.unit.floor.building.landlord == user.landlord_profile
+        )
+        if not (is_landlord or user.is_staff):
+            raise PermissionDenied("Only landlords can send lease renewal notices.")
+
+        custom_note = request.data.get("custom_note", "")
+        email_log = send_lease_expiry_email(lease, custom_note=custom_note)
+        status_code = (
+            status.HTTP_200_OK
+            if email_log.status == "sent"
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        return Response(
+            {
+                "detail": (
+                    "Lease renewal notice sent successfully."
+                    if email_log.status == "sent"
+                    else f"Failed to send lease renewal notice: {email_log.error_message}"
+                ),
+                "email_log": BillingEmailLogSerializer(email_log).data,
+            },
+            status=status_code,
+        )
+
 
 class LeaseReminderViewSet(
     viewsets.ModelViewSet
@@ -1857,6 +1896,46 @@ class LeaseReminderViewSet(
             request,
             *args,
             **kwargs,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="send-notice",
+    )
+    def send_notice(self, request, pk=None):
+        reminder = self.get_object()
+        user = request.user
+        is_landlord = (
+            hasattr(user, "landlord_profile")
+            and reminder.lease.unit.floor.building.landlord == user.landlord_profile
+        )
+        if not (is_landlord or user.is_staff):
+            raise PermissionDenied("Only landlords can trigger reminder notices.")
+
+        custom_note = request.data.get("custom_note", "")
+        email_log = send_lease_expiry_email(reminder.lease, custom_note=custom_note)
+        if email_log.status == "sent":
+            reminder.sent = True
+            reminder.sent_at = timezone.now()
+            reminder.save(update_fields=["sent", "sent_at"])
+
+        status_code = (
+            status.HTTP_200_OK
+            if email_log.status == "sent"
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(
+            {
+                "detail": (
+                    "Lease reminder notice sent successfully."
+                    if email_log.status == "sent"
+                    else f"Failed to send reminder notice: {email_log.error_message}"
+                ),
+                "reminder": LeaseReminderSerializer(reminder).data,
+                "email_log": BillingEmailLogSerializer(email_log).data,
+            },
+            status=status_code,
         )
 
 
@@ -3085,6 +3164,92 @@ class PaymentViewSet(
         )
         return Response(summary, status=status.HTTP_200_OK)
 
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="send-reminder",
+    )
+    def send_reminder(self, request, pk=None):
+        user = request.user
+        payment = self.get_object()
+
+        is_landlord = (
+            hasattr(user, "landlord_profile")
+            and payment.lease.unit.floor.building.landlord == user.landlord_profile
+        )
+        if not (is_landlord or user.is_staff):
+            raise PermissionDenied(
+                "You do not have permission to send reminders for this payment."
+            )
+
+        custom_note = request.data.get("custom_note", "")
+        email_log = send_rent_reminder_email(payment, custom_note=custom_note)
+        serializer = self.get_serializer(payment)
+        status_code = (
+            status.HTTP_200_OK
+            if email_log.status == "sent"
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        return Response(
+            {
+                "detail": (
+                    "Payment reminder sent successfully."
+                    if email_log.status == "sent"
+                    else f"Failed to send payment reminder: {email_log.error_message}"
+                ),
+                "email_log": BillingEmailLogSerializer(email_log).data,
+                "payment": serializer.data,
+            },
+            status=status_code,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="broadcast-reminders",
+    )
+    def broadcast_reminders(self, request):
+        user = request.user
+        if not hasattr(user, "landlord_profile") and not user.is_staff:
+            raise PermissionDenied("Only landlords can broadcast reminders.")
+
+        landlord = getattr(user, "landlord_profile", None)
+        custom_note = request.data.get("custom_note", "")
+        only_overdue = request.data.get("only_overdue", True)
+
+        payments = Payment.objects.filter(
+            lease__unit__floor__building__landlord=landlord,
+            status__in=["pending", "overdue"],
+        ).select_related(
+            "lease", "lease__tenant", "lease__unit", "lease__unit__floor", "lease__unit__floor__building"
+        )
+
+        if only_overdue:
+            payments = payments.filter(due_date__lt=timezone.localdate())
+
+        attempted = 0
+        succeeded = 0
+        failed = 0
+
+        for p in payments:
+            attempted += 1
+            log = send_rent_reminder_email(p, custom_note=custom_note)
+            if log.status == "sent":
+                succeeded += 1
+            else:
+                failed += 1
+
+        return Response(
+            {
+                "detail": f"Reminder broadcast complete. Attempted: {attempted}, Sent: {succeeded}, Failed: {failed}",
+                "attempted": attempted,
+                "succeeded": succeeded,
+                "failed": failed,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
     def get_queryset(self):
         user = self.request.user
@@ -3335,11 +3500,13 @@ class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
         user = self.request.user
         if hasattr(user, "landlord_profile"):
             qs = BillingEmailLog.objects.filter(
-                payment__lease__unit__floor__building__landlord=user.landlord_profile
+                Q(payment__lease__unit__floor__building__landlord=user.landlord_profile)
+                | Q(lease__unit__floor__building__landlord=user.landlord_profile)
             )
         elif hasattr(user, "tenant_profile"):
             qs = BillingEmailLog.objects.filter(
-                payment__lease__tenant=user.tenant_profile
+                Q(payment__lease__tenant=user.tenant_profile)
+                | Q(lease__tenant=user.tenant_profile)
             )
         elif user.is_staff:
             qs = BillingEmailLog.objects.all()
@@ -3354,6 +3521,9 @@ class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
             "payment__lease",
             "payment__lease__tenant",
             "payment__lease__unit",
+            "lease",
+            "lease__tenant",
+            "lease__unit",
         ).order_by("-created_at")
 
     @action(detail=True, methods=["post"], url_path="retry")
@@ -3362,7 +3532,10 @@ class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
         user = request.user
         is_landlord = (
             hasattr(user, "landlord_profile")
-            and log.payment.lease.unit.floor.building.landlord == user.landlord_profile
+            and (
+                (log.payment and log.payment.lease.unit.floor.building.landlord == user.landlord_profile)
+                or (log.lease and log.lease.unit.floor.building.landlord == user.landlord_profile)
+            )
         )
         if not (is_landlord or user.is_staff):
             raise PermissionDenied("Only the landlord can retry billing emails.")
@@ -3372,6 +3545,10 @@ class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
 
         if log.email_type == "invoice":
             res_log = send_invoice_email(log.payment, is_retry=True, email_log=log)
+        elif log.email_type == "reminder":
+            res_log = send_rent_reminder_email(log.payment, is_retry=True, email_log=log)
+        elif log.email_type == "lease_renewal":
+            res_log = send_lease_expiry_email(log.lease, is_retry=True, email_log=log)
         else:
             res_log = send_receipt_email(log.payment, is_retry=True, email_log=log)
 
@@ -3391,4 +3568,257 @@ class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
                 "email_log": BillingEmailLogSerializer(res_log).data,
             },
             status=status_code,
-        )
+        )
+
+
+class AnalyticsViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=["get"], url_path="overview")
+    def overview(self, request):
+        user = request.user
+        if not hasattr(user, "landlord_profile") and not user.is_staff:
+            raise PermissionDenied("Only landlords can access portfolio analytics.")
+
+        landlord = getattr(user, "landlord_profile", None)
+        building_id = request.query_params.get("building")
+        unit_type = request.query_params.get("unit_type")
+        time_range = request.query_params.get("time_range", "6m")
+
+        # Querysets scoped to landlord
+        buildings_qs = Building.objects.filter(landlord=landlord) if landlord else Building.objects.all()
+        if building_id and building_id != "all":
+            buildings_qs = buildings_qs.filter(id=building_id)
+
+        units_qs = Unit.objects.filter(floor__building__in=buildings_qs)
+        if unit_type and unit_type != "all":
+            units_qs = units_qs.filter(unit_type=unit_type)
+
+        leases_qs = Lease.objects.filter(unit__in=units_qs)
+        active_leases_qs = leases_qs.filter(status="active")
+        payments_qs = Payment.objects.filter(lease__in=leases_qs)
+
+        today = timezone.localdate()
+
+        # Calculate time range start date
+        if time_range == "12m":
+            start_date = (today.replace(day=1) - datetime.timedelta(days=365)).replace(day=1)
+            months_count = 12
+        elif time_range == "ytd":
+            start_date = today.replace(month=1, day=1)
+            months_count = max(1, today.month)
+        elif time_range == "all":
+            start_date = today.replace(year=today.year - 2, month=1, day=1)
+            months_count = 24
+        else:  # 6m default
+            start_date = (today.replace(day=1) - datetime.timedelta(days=155)).replace(day=1)
+            months_count = 6
+
+        range_payments = payments_qs.filter(due_date__gte=start_date, due_date__lte=today)
+
+        # Core Portfolio KPIs
+        total_properties = buildings_qs.count()
+        total_units = units_qs.count()
+        occupied_unit_ids = set(active_leases_qs.values_list("unit_id", flat=True))
+        occupied_units = len(occupied_unit_ids)
+        vacant_units = max(0, total_units - occupied_units)
+        occupancy_rate = round((occupied_units / total_units * 100), 1) if total_units > 0 else 0.0
+
+        expected_monthly_rent = float(active_leases_qs.aggregate(total=Sum("monthly_rent"))["total"] or 0)
+        potential_monthly_rent = float(units_qs.aggregate(total=Sum("monthly_rent"))["total"] or 0)
+        monthly_vacancy_loss = max(0.0, potential_monthly_rent - expected_monthly_rent)
+
+        total_collected = float(range_payments.filter(status="paid").aggregate(total=Sum("amount"))["total"] or 0)
+        total_overdue = float(payments_qs.filter(status__in=["pending", "overdue"], due_date__lt=today).aggregate(total=Sum("amount"))["total"] or 0)
+
+        total_due_in_range = float(range_payments.aggregate(total=Sum("amount"))["total"] or 0)
+        collection_rate = round((total_collected / total_due_in_range * 100), 1) if total_due_in_range > 0 else 100.0
+        arpu = round(expected_monthly_rent / occupied_units, 2) if occupied_units > 0 else 0.0
+
+        commercial_active = active_leases_qs.filter(unit__unit_type="commercial")
+        commercial_rent_monthly = float(commercial_active.aggregate(total=Sum("monthly_rent"))["total"] or 0)
+        gst_collected = round(commercial_rent_monthly * 0.18, 2)
+
+        # Monthly Trends
+        monthly_trends = []
+        cur_year = today.year
+        cur_month = today.month
+
+        for i in range(months_count - 1, -1, -1):
+            m_year = cur_year
+            m_month = cur_month - i
+            while m_month <= 0:
+                m_month += 12
+                m_year -= 1
+
+            m_start = datetime.date(m_year, m_month, 1)
+            if m_month == 12:
+                next_m_start = datetime.date(m_year + 1, 1, 1)
+            else:
+                next_m_start = datetime.date(m_year, m_month + 1, 1)
+            m_end = next_m_start - datetime.timedelta(days=1)
+
+            month_key = f"{m_year}-{m_month:02d}"
+            month_label = m_start.strftime("%b %Y")
+
+            m_payments = payments_qs.filter(due_date__gte=m_start, due_date__lte=m_end)
+            m_collected = float(m_payments.filter(status="paid").aggregate(total=Sum("amount"))["total"] or 0)
+            m_overdue = float(m_payments.filter(status__in=["pending", "overdue"]).aggregate(total=Sum("amount"))["total"] or 0)
+            m_expected = float(m_payments.aggregate(total=Sum("amount"))["total"] or 0)
+            if m_expected == 0:
+                m_expected = expected_monthly_rent
+
+            m_rate = round((m_collected / (m_collected + m_overdue) * 100), 1) if (m_collected + m_overdue) > 0 else 100.0
+
+            monthly_trends.append({
+                "month": month_key,
+                "label": month_label,
+                "expected": m_expected,
+                "collected": m_collected,
+                "overdue": m_overdue,
+                "collection_rate": m_rate,
+                "payments_count": m_payments.count(),
+            })
+
+        # Property Benchmarks
+        benchmarks = []
+        for b in buildings_qs:
+            b_units = units_qs.filter(floor__building=b)
+            b_total_units = b_units.count()
+            b_occupied_units = active_leases_qs.filter(unit__floor__building=b).values("unit_id").distinct().count()
+            b_vacant_units = max(0, b_total_units - b_occupied_units)
+            b_occ_rate = round((b_occupied_units / b_total_units * 100), 1) if b_total_units > 0 else 0.0
+
+            b_payments = range_payments.filter(lease__unit__floor__building=b)
+            b_collected = float(b_payments.filter(status="paid").aggregate(total=Sum("amount"))["total"] or 0)
+            b_overdue = float(payments_qs.filter(lease__unit__floor__building=b, status__in=["pending", "overdue"], due_date__lt=today).aggregate(total=Sum("amount"))["total"] or 0)
+            b_expected_monthly = float(active_leases_qs.filter(unit__floor__building=b).aggregate(total=Sum("monthly_rent"))["total"] or 0)
+            b_total_due = float(b_payments.aggregate(total=Sum("amount"))["total"] or 0)
+            b_col_rate = round((b_collected / b_total_due * 100), 1) if b_total_due > 0 else 100.0
+
+            b_area = float(b_units.aggregate(total=Sum("area"))["total"] or 0)
+            b_avg_sqft = round(b_expected_monthly / b_area, 2) if b_area > 0 else 0.0
+
+            benchmarks.append({
+                "id": b.id,
+                "name": b.name,
+                "city": b.city,
+                "state": b.state,
+                "total_units": b_total_units,
+                "occupied_units": b_occupied_units,
+                "vacant_units": b_vacant_units,
+                "occupancy_rate": b_occ_rate,
+                "expected_monthly": b_expected_monthly,
+                "collected": b_collected,
+                "overdue": b_overdue,
+                "collection_efficiency": b_col_rate,
+                "total_area": b_area,
+                "avg_rent_sqft": b_avg_sqft,
+            })
+
+        # Unit Type Distribution
+        res_units = units_qs.filter(unit_type="residential")
+        com_units = units_qs.filter(unit_type="commercial")
+        res_active = active_leases_qs.filter(unit__unit_type="residential")
+        com_active = active_leases_qs.filter(unit__unit_type="commercial")
+
+        res_total = res_units.count()
+        res_occ = res_active.values("unit_id").distinct().count()
+        com_total = com_units.count()
+        com_occ = com_active.values("unit_id").distinct().count()
+
+        unit_types = {
+            "residential": {
+                "total": res_total,
+                "occupied": res_occ,
+                "vacant": max(0, res_total - res_occ),
+                "occupancy_rate": round(res_occ / res_total * 100, 1) if res_total > 0 else 0.0,
+                "monthly_rent": float(res_active.aggregate(t=Sum("monthly_rent"))["t"] or 0),
+            },
+            "commercial": {
+                "total": com_total,
+                "occupied": com_occ,
+                "vacant": max(0, com_total - com_occ),
+                "occupancy_rate": round(com_occ / com_total * 100, 1) if com_total > 0 else 0.0,
+                "monthly_rent": float(com_active.aggregate(t=Sum("monthly_rent"))["t"] or 0),
+            },
+        }
+
+        # Payment Methods
+        methods = {
+            "online": {"count": 0, "total": 0.0},
+            "bank_transfer": {"count": 0, "total": 0.0},
+            "cash": {"count": 0, "total": 0.0},
+        }
+        for p in range_payments.filter(status="paid"):
+            m = p.payment_method or "online"
+            if m not in methods:
+                methods[m] = {"count": 0, "total": 0.0}
+            methods[m]["count"] += 1
+            methods[m]["total"] += float(p.amount or 0)
+
+        # Aging Receivables
+        aging = {
+            "under_30": {"count": 0, "amount": 0.0},
+            "between_31_60": {"count": 0, "amount": 0.0},
+            "over_60": {"count": 0, "amount": 0.0},
+            "total_overdue": 0.0,
+        }
+        for p in payments_qs.filter(status__in=["pending", "overdue"], due_date__lt=today):
+            days = (today - p.due_date).days
+            amt = float(p.amount or 0)
+            aging["total_overdue"] += amt
+            if days <= 30:
+                aging["under_30"]["count"] += 1
+                aging["under_30"]["amount"] += amt
+            elif days <= 60:
+                aging["between_31_60"]["count"] += 1
+                aging["between_31_60"]["amount"] += amt
+            else:
+                aging["over_60"]["count"] += 1
+                aging["over_60"]["amount"] += amt
+
+        # Lease Expiries Horizon
+        exp_30 = active_leases_qs.filter(end_date__gte=today, end_date__lte=today + datetime.timedelta(days=30))
+        exp_60 = active_leases_qs.filter(end_date__gte=today, end_date__lte=today + datetime.timedelta(days=60))
+        exp_90 = active_leases_qs.filter(end_date__gte=today, end_date__lte=today + datetime.timedelta(days=90))
+
+        upcoming_expiries = {
+            "within_30d": {
+                "count": exp_30.count(),
+                "at_risk_rent": float(exp_30.aggregate(t=Sum("monthly_rent"))["t"] or 0),
+            },
+            "within_60d": {
+                "count": exp_60.count(),
+                "at_risk_rent": float(exp_60.aggregate(t=Sum("monthly_rent"))["t"] or 0),
+            },
+            "within_90d": {
+                "count": exp_90.count(),
+                "at_risk_rent": float(exp_90.aggregate(t=Sum("monthly_rent"))["t"] or 0),
+            },
+        }
+
+        return Response({
+            "kpis": {
+                "total_properties": total_properties,
+                "total_units": total_units,
+                "occupied_units": occupied_units,
+                "vacant_units": vacant_units,
+                "occupancy_rate": occupancy_rate,
+                "expected_monthly_rent": expected_monthly_rent,
+                "potential_monthly_rent": potential_monthly_rent,
+                "monthly_vacancy_loss": monthly_vacancy_loss,
+                "total_collected": total_collected,
+                "total_overdue": total_overdue,
+                "collection_rate": collection_rate,
+                "arpu": arpu,
+                "gst_collected": gst_collected,
+                "time_range": time_range,
+            },
+            "monthly_trends": monthly_trends,
+            "property_benchmarks": benchmarks,
+            "unit_types": unit_types,
+            "payment_methods": methods,
+            "aging_analysis": aging,
+            "upcoming_expiries": upcoming_expiries,
+        })
