@@ -16,8 +16,11 @@ import {
   EyeIcon,
   PlusIcon,
   FileTextIcon,
+  KeyIcon,
+  DashboardIcon,
 } from "../components/Icons";
 import "./Tenants.css";
+import TenantCredentialsModal from "../components/TenantCredentialsModal";
 
 import { API_URL } from "../api";
 import {
@@ -56,6 +59,13 @@ function Tenants() {
   const [showDetails, setShowDetails] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT_FORM);
+
+  // Tenant Password Reset & Credentials
+  const [resetTargetTenant, setResetTargetTenant] = useState(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [generatedCredentials, setGeneratedCredentials] = useState(null);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
 
   const token = localStorage.getItem("access_token");
 
@@ -536,6 +546,41 @@ function Tenants() {
     setPaymentForm(EMPTY_PAYMENT_FORM);
   };
 
+  const promptResetPassword = (tenant, e) => {
+    if (e) e.stopPropagation();
+    setResetTargetTenant(tenant);
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmResetPassword = async () => {
+    if (!resetTargetTenant) return;
+    setResettingPassword(true);
+    setError("");
+
+    try {
+      const response = await authenticatedFetch(
+        `${API_URL}/tenants/${resetTargetTenant.id}/reset-password/`,
+        { method: "POST" }
+      );
+
+      if (!response) return;
+      const data = await readResponse(response);
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Unable to reset tenant password.");
+      }
+
+      setShowResetConfirm(false);
+      setGeneratedCredentials(data.temporary_credentials);
+      setShowCredentialsModal(true);
+    } catch (err) {
+      setError(err.message || "Failed to reset tenant password.");
+      setShowResetConfirm(false);
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   const handlePaymentChange = (event) => {
     const { name, value } = event.target;
     let sanitizedValue = value;
@@ -719,7 +764,8 @@ function Tenants() {
               onClick={() => setViewMode("cards")}
               title="Card Grid View"
             >
-              Cards
+              <DashboardIcon size={14} />
+              <span>Cards</span>
             </button>
             <button
               type="button"
@@ -727,7 +773,8 @@ function Tenants() {
               onClick={() => setViewMode("table")}
               title="Data Table View"
             >
-              Table
+              <FileTextIcon size={14} />
+              <span>Table</span>
             </button>
           </div>
         </div>
@@ -866,6 +913,16 @@ function Tenants() {
                       >
                         <EyeIcon size={15} />
                         <span>Details</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn-action-reset-pwd"
+                        onClick={(e) => promptResetPassword(tenant, e)}
+                        title="Reset Tenant Portal Password"
+                      >
+                        <KeyIcon size={13} />
+                        <span>Reset Pwd</span>
                       </button>
 
                       {lease && rentStatus.status === "pending" && (
@@ -1024,6 +1081,16 @@ function Tenants() {
                                   <span>View Details</span>
                                 </button>
 
+                                <button
+                                  type="button"
+                                  className="btn-card-reset-pwd"
+                                  onClick={(e) => promptResetPassword(tenant, e)}
+                                  title="Reset Tenant Portal Password"
+                                >
+                                  <KeyIcon size={13} />
+                                  <span>Reset Pwd</span>
+                                </button>
+
                                 {rentStatus.status === "pending" && (
                                   <button
                                     type="button"
@@ -1093,11 +1160,20 @@ function Tenants() {
                       <div className="card-actions-strip" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          className="btn-card-details full-width"
+                          className="btn-card-details"
                           onClick={() => openTenant(tenant)}
                         >
                           <EyeIcon size={14} />
                           <span>View Details</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-card-reset-pwd"
+                          onClick={(e) => promptResetPassword(tenant, e)}
+                          title="Reset Tenant Portal Password"
+                        >
+                          <KeyIcon size={13} />
+                          <span>Reset Pwd</span>
                         </button>
                       </div>
                     </div>
@@ -1322,7 +1398,15 @@ function Tenants() {
             </div>
 
             {/* Modal Footer */}
-            <div className="modal-footer">
+            <div className="modal-footer modal-footer-split">
+              <button
+                type="button"
+                className="btn-modal-reset-pwd"
+                onClick={(e) => promptResetPassword(selectedTenant, e)}
+              >
+                <KeyIcon size={14} />
+                <span>Reset Tenant Password</span>
+              </button>
               <button
                 type="button"
                 className="btn-modal-cancel"
@@ -1445,6 +1529,88 @@ function Tenants() {
           </div>
         </div>
       )}
+
+      {/* RESET PASSWORD CONFIRMATION MODAL */}
+      {showResetConfirm && resetTargetTenant && (
+        <div
+          className="tenant-modal-overlay"
+          onClick={() => !resettingPassword && setShowResetConfirm(false)}
+        >
+          <div
+            className="tenant-confirm-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-topbar">
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div className="confirm-icon-badge">
+                  <KeyIcon size={20} />
+                </div>
+                <div>
+                  <h2>Reset Tenant Password</h2>
+                  <p className="modal-subtitle">Generate a fresh temporary portal password</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-icon-btn"
+                onClick={() => !resettingPassword && setShowResetConfirm(false)}
+                aria-label="Close"
+              >
+                <CloseIcon size={20} />
+              </button>
+            </div>
+
+            <div className="confirm-modal-body">
+              <p>
+                Are you sure you want to generate a new temporary password for{" "}
+                <strong>{resetTargetTenant.full_name}</strong> (
+                {resetTargetTenant.email || "No email"}
+                )?
+              </p>
+              <div className="confirm-warning-box">
+                <WarningIcon size={16} />
+                <span>
+                  The tenant will be required to change their temporary password
+                  immediately upon their next portal sign-in.
+                </span>
+              </div>
+            </div>
+
+            <div className="modal-footer in-form">
+              <button
+                type="button"
+                className="btn-modal-cancel"
+                onClick={() => setShowResetConfirm(false)}
+                disabled={resettingPassword}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-modal-confirm-reset"
+                onClick={handleConfirmResetPassword}
+                disabled={resettingPassword}
+              >
+                {resettingPassword ? "Generating..." : "Yes, Reset Password"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ONE-TIME CREDENTIALS MODAL */}
+      <TenantCredentialsModal
+        isOpen={showCredentialsModal}
+        onClose={() => {
+          setShowCredentialsModal(false);
+          setGeneratedCredentials(null);
+          setResetTargetTenant(null);
+        }}
+        credentials={generatedCredentials}
+        tenantName={resetTargetTenant?.full_name}
+        title="Tenant Portal Password Reset"
+        isReset={true}
+      />
     </LandlordLayout>
   );
 }

@@ -434,7 +434,7 @@ function Buildings() {
       return;
     }
 
-    if (!/^\d{6}$/.test(form.pincode.trim())) {
+    if (!isValidPincode(form.pincode)) {
       setError(
         "Pincode must contain exactly 6 digits."
       );
@@ -588,7 +588,7 @@ function Buildings() {
       return;
     }
 
-    if (!/^\d{6}$/.test(form.pincode.trim())) {
+    if (!isValidPincode(form.pincode)) {
       setError(
         "Pincode must contain exactly 6 digits."
       );
@@ -1624,7 +1624,8 @@ function Buildings() {
                   required
                   inputMode="numeric"
                   maxLength={6}
-                  pattern="\\d{6}"
+                  pattern="^[1-9][0-9]{5}$"
+                  title="Please enter a valid 6-digit Indian pincode starting with 1-9."
                   autoComplete="postal-code"
                 />
 
@@ -1887,6 +1888,11 @@ function Buildings() {
                     disabled={
                       invoiceTemplateSaving
                     }
+                    maxLength={6}
+                    pattern="^[1-9][0-9]{5}$"
+                    title="Please enter a valid 6-digit Indian pincode starting with 1-9."
+                    inputMode="numeric"
+                    autoComplete="postal-code"
                   />
                 </div>
 

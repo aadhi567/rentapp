@@ -1,5 +1,16 @@
+import os
+import uuid
 from django.contrib.auth.models import User
 from django.db import models
+from .upi_service import validate_upi_id
+
+
+def maintenance_image_upload_to(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        ext = ".jpg"
+    return f"maintenance/{uuid.uuid4().hex}{ext}"
+
 
 
 class Landlord(models.Model):
@@ -19,15 +30,103 @@ class Landlord(models.Model):
         blank=True,
     )
 
+    upi_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        validators=[validate_upi_id],
+        help_text="Landlord UPI ID / VPA for receiving direct rent payments (e.g. name@upi)",
+    )
+
+    avatar = models.ImageField(
+        upload_to="landlord_avatars/",
+        blank=True,
+        null=True,
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
+
+    def get_effective_upi_id(self, building=None):
+        """
+        Resolve the effective UPI ID to receive rent payments for a property.
+        Checks building invoice settings, then landlord profile, then legacy settings.
+        """
+        if building:
+            settings = getattr(building, "invoice_settings", None)
+            if settings and settings.upi_id:
+                return settings.upi_id.strip()
+        if self.upi_id:
+            return self.upi_id.strip()
+        legacy = self.legacy_invoice_settings.first()
+        if legacy and legacy.upi_id:
+            return legacy.upi_id.strip()
+        return ""
 
     def __str__(self):
         return (
             self.user.get_full_name()
             or self.user.username
         )
+
+
+class NotificationPreference(models.Model):
+    THEME_CHOICES = [
+        ("light", "Light"),
+        ("dark", "Dark"),
+        ("system", "System"),
+    ]
+
+    landlord = models.OneToOneField(
+        Landlord,
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+    )
+
+    rent_payment_received = models.BooleanField(
+        default=True,
+        help_text="Get notified when a tenant's rent payment is successfully recorded.",
+    )
+
+    rent_payment_pending = models.BooleanField(
+        default=True,
+        help_text="Get notified when a rent payment requires verification.",
+    )
+
+    rent_overdue = models.BooleanField(
+        default=True,
+        help_text="Get notified when a tenant's rent becomes overdue.",
+    )
+
+    maintenance_requests = models.BooleanField(
+        default=True,
+        help_text="Get notified when a tenant submits a maintenance request.",
+    )
+
+    lease_expiry = models.BooleanField(
+        default=True,
+        help_text="Get notified when a lease is approaching its expiry date.",
+    )
+
+    new_tenant = models.BooleanField(
+        default=True,
+        help_text="Get notified when a new tenant is added.",
+    )
+
+    theme = models.CharField(
+        max_length=20,
+        choices=THEME_CHOICES,
+        default="system",
+        help_text="Preferred UI appearance theme.",
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    def __str__(self):
+        return f"Notification Preferences for {self.landlord}"
 
 
 class InvoiceSettings(models.Model):
@@ -375,6 +474,19 @@ class Tenant(models.Model):
         blank=True,
     )
 
+    landlord = models.ForeignKey(
+        "Landlord",
+        on_delete=models.SET_NULL,
+        related_name="created_tenants",
+        null=True,
+        blank=True,
+    )
+
+    must_change_password = models.BooleanField(
+        default=True,
+        help_text="Designates whether the tenant is required to set a new password on first login.",
+    )
+
     first_name = models.CharField(
         max_length=100,
         default="",
@@ -440,17 +552,13 @@ class Tenant(models.Model):
         auto_now=True,
     )
 
-    def __str__(self):
-        full_name = (
-            f"{self.first_name} "
-            f"{self.last_name}"
-        ).strip()
+    @property
+    def full_name(self):
+        name = f"{self.first_name} {self.last_name}".strip()
+        return name or self.email or f"Tenant #{self.id}"
 
-        return (
-            full_name
-            or self.email
-            or f"Tenant #{self.id}"
-        )
+    def __str__(self):
+        return self.full_name
 
 
 class Lease(models.Model):
@@ -621,12 +729,20 @@ class Payment(models.Model):
             "overdue",
             "Overdue",
         ),
+        (
+            "cancelled",
+            "Cancelled",
+        ),
     ]
 
     PAYMENT_METHODS = [
         (
             "online",
             "Online",
+        ),
+        (
+            "upi",
+            "UPI",
         ),
         (
             "cash",
@@ -717,23 +833,22 @@ class Payment(models.Model):
 
 class MaintenanceRequest(models.Model):
 
+    CATEGORY_CHOICES = [
+        ("plumbing", "Plumbing"),
+        ("electrical", "Electrical"),
+        ("cleaning", "Cleaning"),
+        ("security", "Security"),
+        ("structural", "Structural"),
+        ("other", "Other"),
+    ]
+
     REQUEST_STATUS = [
-        (
-            "pending",
-            "Pending",
-        ),
-        (
-            "in_progress",
-            "In Progress",
-        ),
-        (
-            "resolved",
-            "Resolved",
-        ),
-        (
-            "rejected",
-            "Rejected",
-        ),
+        ("open", "Open"),
+        ("in_progress", "In Progress"),
+        ("resolved", "Resolved"),
+        ("closed", "Closed"),
+        ("pending", "Pending"),
+        ("rejected", "Rejected"),
     ]
 
     PRIORITY_LEVELS = [
@@ -771,6 +886,12 @@ class MaintenanceRequest(models.Model):
         max_length=200,
     )
 
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default="other",
+    )
+
     description = models.TextField()
 
     priority = models.CharField(
@@ -782,13 +903,23 @@ class MaintenanceRequest(models.Model):
     status = models.CharField(
         max_length=20,
         choices=REQUEST_STATUS,
-        default="pending",
+        default="open",
     )
 
     image = models.ImageField(
-        upload_to="maintenance/",
+        upload_to=maintenance_image_upload_to,
         blank=True,
         null=True,
+    )
+
+    landlord_response = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
     )
 
     created_at = models.DateTimeField(
@@ -884,4 +1015,124 @@ class BillingEmailLog(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.get_email_type_display()} to {self.recipient_email} ({self.status})"
+        return f"{self.get_email_type_display()} to {self.recipient_email} ({self.status})"
+
+
+class PaymentTransaction(models.Model):
+    """
+    Tracks real UPI payment transaction lifecycle for rent payments.
+    Life cycle: PENDING -> SUCCESS (after landlord verification) or CANCELLED / FAILED.
+    """
+
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("SUCCESS", "Success"),
+        ("FAILED", "Failed"),
+        ("CANCELLED", "Cancelled"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="payment_transactions",
+    )
+
+    landlord = models.ForeignKey(
+        Landlord,
+        on_delete=models.CASCADE,
+        related_name="payment_transactions",
+    )
+
+    building = models.ForeignKey(
+        Building,
+        on_delete=models.CASCADE,
+        related_name="payment_transactions",
+        null=True,
+        blank=True,
+    )
+
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.CASCADE,
+        related_name="transactions",
+        help_text="Associated rent/invoice billing record",
+    )
+
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Exact amount required for the payment",
+    )
+
+    currency = models.CharField(
+        max_length=10,
+        default="INR",
+    )
+
+    payment_method = models.CharField(
+        max_length=20,
+        default="upi",
+    )
+
+    upi_id = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Landlord UPI ID at the time of payment initiation",
+    )
+
+    transaction_reference = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        help_text="Unique internal reference for this UPI transaction",
+    )
+
+    utr = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Bank / UPI reference number (UTR) provided by the tenant",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+        db_index=True,
+    )
+
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    initiated_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    paid_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status"]),
+            models.Index(fields=["transaction_reference"]),
+            models.Index(fields=["payment", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.transaction_reference} - {self.tenant} - ₹{self.amount} ({self.status})"
+

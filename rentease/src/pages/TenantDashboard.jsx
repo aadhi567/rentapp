@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import TenantLayout from "../components/TenantLayout";
 import {
   HomeIcon,
   BuildingIcon,
@@ -9,79 +10,62 @@ import {
   RupeeIcon,
   CalendarIcon,
   DownloadIcon,
+  EyeIcon,
   PlusIcon,
-  CloseIcon,
   CheckIcon,
   WarningIcon,
-  LogoutIcon,
+  FileTextIcon,
+  KeyIcon,
   UserIcon,
+  WrenchIcon,
 } from "../components/Icons";
 import "./TenantDashboard.css";
-
 import { API_URL } from "../api";
 
 function TenantDashboard() {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
   const token = localStorage.getItem("access_token");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const [leases, setLeases] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [maintenanceList, setMaintenanceList] = useState([]);
+  const [complaints, setComplaints] = useState([]);
+  const [tenantProfile, setTenantProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  // Maintenance Request Modal State
-  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
-  const [newRequest, setNewRequest] = useState({
-    unit: "",
-    title: "",
-    description: "",
-    priority: "medium",
-  });
-  const [submittingRequest, setSubmittingRequest] = useState(false);
-  const [requestError, setRequestError] = useState("");
-  const [requestSuccess, setRequestSuccess] = useState("");
-
-  const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("user");
-    navigate("/login", { replace: true });
-  };
+  const [downloadingId, setDownloadingId] = useState(null);
 
   useEffect(() => {
-    if (!token) {
-      handleLogout();
-      return;
-    }
-    fetchTenantData();
-  }, [token]);
+    fetchDashboardData();
+  }, []);
 
-  const fetchTenantData = async () => {
+  const fetchDashboardData = async () => {
     setLoading(true);
     setError("");
 
     try {
       const headers = { Authorization: `Bearer ${token}` };
 
-      // Fetch leases, payments, maintenance concurrently
-      const [leasesRes, paymentsRes, maintRes] = await Promise.all([
+      const [leasesRes, paymentsRes, maintRes, tenantsRes] = await Promise.all([
         fetch(`${API_URL}/leases/`, { headers }),
         fetch(`${API_URL}/payments/`, { headers }),
         fetch(`${API_URL}/maintenance/`, { headers }),
+        fetch(`${API_URL}/tenants/`, { headers }),
       ]);
 
       if (leasesRes.status === 401 || paymentsRes.status === 401) {
-        handleLogout();
+        localStorage.removeItem("access_token");
+        navigate("/tenant/login", { replace: true });
         return;
       }
 
-      const [leasesData, paymentsData, maintData] = await Promise.all([
-        leasesRes.ok ? leasesRes.json() : [],
-        paymentsRes.ok ? paymentsRes.json() : [],
-        maintRes.ok ? maintRes.json() : [],
-      ]);
+      const [leasesData, paymentsData, maintData, tenantsData] =
+        await Promise.all([
+          leasesRes.ok ? leasesRes.json() : [],
+          paymentsRes.ok ? paymentsRes.json() : [],
+          maintRes.ok ? maintRes.json() : [],
+          tenantsRes.ok ? tenantsRes.json() : [],
+        ]);
 
       const leaseItems = Array.isArray(leasesData)
         ? leasesData
@@ -92,15 +76,16 @@ function TenantDashboard() {
       const maintItems = Array.isArray(maintData)
         ? maintData
         : maintData.results || [];
+      const tenantItems = Array.isArray(tenantsData)
+        ? tenantsData
+        : tenantsData.results || [];
 
       setLeases(leaseItems);
       setPayments(paymentItems);
-      setMaintenanceList(maintItems);
+      setComplaints(maintItems);
 
-      // Pre-select unit for maintenance modal if tenant has an active lease
-      const active = leaseItems.find((l) => l.status === "active") || leaseItems[0];
-      if (active) {
-        setNewRequest((prev) => ({ ...prev, unit: active.unit }));
+      if (tenantItems.length > 0) {
+        setTenantProfile(tenantItems[0]);
       }
     } catch (err) {
       console.error("Error loading tenant dashboard:", err);
@@ -110,468 +95,486 @@ function TenantDashboard() {
     }
   };
 
-  const handleCreateRequest = async (e) => {
-    e.preventDefault();
-    if (!newRequest.unit || !newRequest.title.trim()) {
-      setRequestError("Please select a unit and enter a request title.");
-      return;
-    }
-
-    setSubmittingRequest(true);
-    setRequestError("");
-    setRequestSuccess("");
-
+  const handleDownloadInvoice = async (paymentId) => {
+    setDownloadingId(paymentId);
     try {
-      const res = await fetch(`${API_URL}/maintenance/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newRequest),
+      const res = await fetch(`${API_URL}/payments/${paymentId}/invoice/`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data.detail || Object.values(data).flat()[0] || "Failed to submit request."
-        );
-      }
-
-      setRequestSuccess("Maintenance request submitted successfully!");
-      setMaintenanceList((prev) => [data, ...prev]);
-      setTimeout(() => {
-        setShowMaintenanceModal(false);
-        setRequestSuccess("");
-        setNewRequest((prev) => ({
-          ...prev,
-          title: "",
-          description: "",
-          priority: "medium",
-        }));
-      }, 1200);
+      if (!res.ok) throw new Error("Could not download invoice PDF.");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rent-invoice-${String(paymentId).padStart(6, "0")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
-      setRequestError(err.message || "Error submitting maintenance request.");
+      alert(err.message || "Failed to download invoice.");
     } finally {
-      setSubmittingRequest(false);
+      setDownloadingId(null);
     }
   };
 
-  const activeLease = leases.find((l) => l.status === "active") || leases[0];
+  const activeLease = useMemo(() => {
+    return leases.find((l) => l.status === "active") || leases[0] || null;
+  }, [leases]);
 
-  const pendingPayments = payments.filter((p) => p.status !== "paid");
-  const paidPayments = payments.filter((p) => p.status === "paid");
+  const nextDuePayment = useMemo(() => {
+    return (
+      payments
+        .filter((p) => p.status === "pending" || p.status === "overdue")
+        .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0] || null
+    );
+  }, [payments]);
+
+  const totalPaidRent = useMemo(() => {
+    return payments
+      .filter((p) => p.status === "paid")
+      .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  }, [payments]);
+
+  const openComplaintsCount = useMemo(() => {
+    return complaints.filter(
+      (c) => c.status === "open" || c.status === "in_progress" || c.status === "pending"
+    ).length;
+  }, [complaints]);
+
+  const recentInvoices = useMemo(() => {
+    return payments
+      .filter((p) => p.payment_type === "rent")
+      .slice(0, 4);
+  }, [payments]);
+
+  const recentComplaints = useMemo(() => {
+    return complaints.slice(0, 3);
+  }, [complaints]);
+
+  const tenantName = tenantProfile
+    ? tenantProfile.full_name
+    : user.first_name
+    ? `${user.first_name} ${user.last_name || ""}`.trim()
+    : user.username || "Tenant";
 
   return (
-    <div className="tenant-portal">
-      {/* Top Navbar */}
-      <header className="tenant-header">
-        <div className="tenant-header-inner">
-          <div className="tenant-brand">
-            <div className="tenant-logo-icon">
-              <HomeIcon size={20} />
-            </div>
-            <div className="tenant-brand-text">
-              <span className="tenant-logo-title">RentEase</span>
-              <span className="tenant-portal-pill">Tenant Portal</span>
-            </div>
-          </div>
-
-          <div className="tenant-header-user">
-            <div className="tenant-avatar-badge">
-              <UserIcon size={16} />
-              <span className="tenant-name">{user?.username || "Tenant"}</span>
-            </div>
-            <button
-              type="button"
-              className="tenant-logout-button"
-              onClick={handleLogout}
-              title="Sign Out"
-            >
-              <LogoutIcon size={16} />
-              <span>Logout</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="tenant-main">
-        {/* Welcome Hero */}
-        <section className="tenant-welcome-banner">
-          <div className="tenant-welcome-content">
-            <h1>Welcome back, {user?.username}!</h1>
-            <p>
-              Manage your leased property, download official invoices, and submit maintenance tickets.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="tenant-action-btn primary"
-            onClick={() => setShowMaintenanceModal(true)}
-          >
-            <PlusIcon size={16} />
-            <span>Request Maintenance</span>
-          </button>
-        </section>
-
+    <TenantLayout
+      breadcrumb="Dashboard"
+      title="Tenant Overview"
+      subtitle={`Welcome to your RentEase portal, ${tenantName}.`}
+    >
+      <div className="tenant-dash-container">
         {error && (
-          <div className="tenant-alert error">
+          <div className="tenant-dash-error-banner" role="alert">
             <WarningIcon size={18} />
             <span>{error}</span>
           </div>
         )}
 
         {loading ? (
-          <div className="tenant-loading-box">
-            <div className="tenant-spinner" />
-            <p>Fetching your account and lease details...</p>
+          <div className="tenant-dash-loading">
+            <div className="tenant-dash-spinner" />
+            <p>Loading your rental dashboard...</p>
           </div>
         ) : (
-          <div className="tenant-layout-grid">
-            {/* Left Column: Lease & Maintenance */}
-            <div className="tenant-grid-col primary-col">
-              {/* Active Lease Card */}
-              <section className="tenant-card">
-                <div className="tenant-card-header">
-                  <div className="tenant-card-title-group">
-                    <BuildingIcon size={18} className="card-icon" />
-                    <h2>Rented Property & Lease</h2>
-                  </div>
-                  {activeLease && (
-                    <span
-                      className={`tenant-status-tag ${
-                        activeLease.status === "active" ? "active" : "pending"
-                      }`}
-                    >
-                      {activeLease.status?.toUpperCase() || "ACTIVE"}
+          <>
+            {/* HERO CARD */}
+            <div className="tenant-hero-card">
+              <div className="hero-content">
+                <span className="hero-greeting">WELCOME BACK</span>
+                <h2 className="hero-tenant-name">{tenantName}</h2>
+                {activeLease ? (
+                  <p className="hero-unit-text">
+                    <BuildingIcon size={16} />
+                    <span>
+                      Unit {activeLease.unit_number || activeLease.unit_name} &bull;{" "}
+                      {activeLease.building_name} (Floor {activeLease.floor_number})
                     </span>
+                  </p>
+                ) : (
+                  <p className="hero-unit-text">
+                    <span>No active lease currently assigned to your account.</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="hero-actions">
+                <Link to="/tenant/invoices" className="btn-hero-invoices">
+                  <FileTextIcon size={16} />
+                  <span>View Invoices</span>
+                </Link>
+                <Link to="/tenant/maintenance" className="btn-hero-complaint">
+                  <PlusIcon size={16} />
+                  <span>New Complaint</span>
+                </Link>
+              </div>
+            </div>
+
+            {/* METRICS GRID */}
+            <div className="tenant-metrics-grid">
+              {/* MONTHLY RENT */}
+              <div className="tenant-metric-card">
+                <div className="metric-header">
+                  <span className="metric-title">MONTHLY RENT</span>
+                  <div className="metric-icon-wrap blue">
+                    <RupeeIcon size={18} />
+                  </div>
+                </div>
+                <div className="metric-body">
+                  <strong className="metric-val">
+                    ₹
+                    {activeLease
+                      ? parseFloat(activeLease.monthly_rent || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })
+                      : "0.00"}
+                  </strong>
+                  <span className="metric-sub">
+                    {activeLease?.lease_type_display || "Monthly Lease"}
+                  </span>
+                </div>
+              </div>
+
+              {/* NEXT PAYMENT STATUS */}
+              <div className="tenant-metric-card">
+                <div className="metric-header">
+                  <span className="metric-title">NEXT RENT PAYMENT</span>
+                  <div
+                    className={`metric-icon-wrap ${
+                      nextDuePayment?.status === "overdue"
+                        ? "red"
+                        : nextDuePayment
+                        ? "amber"
+                        : "green"
+                    }`}
+                  >
+                    <CalendarIcon size={18} />
+                  </div>
+                </div>
+                <div className="metric-body">
+                  {nextDuePayment ? (
+                    <>
+                      <strong className="metric-val">
+                        ₹
+                        {parseFloat(nextDuePayment.amount || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </strong>
+                      <span className="metric-sub">
+                        Due: {nextDuePayment.due_date} ({nextDuePayment.status.toUpperCase()})
+                      </span>
+                      <Link
+                        to={`/tenant/pay/${nextDuePayment.id}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          marginTop: "8px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: "#16a34a",
+                          textDecoration: "none",
+                        }}
+                      >
+                        <span>Pay via UPI →</span>
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      <strong className="metric-val green-text">All Settled</strong>
+                      <span className="metric-sub">No pending rent dues</span>
+                    </>
                   )}
                 </div>
+              </div>
 
+              {/* ACTIVE MAINTENANCE */}
+              <div className="tenant-metric-card">
+                <div className="metric-header">
+                  <span className="metric-title">OPEN REPAIR TICKETS</span>
+                  <div className="metric-icon-wrap amber">
+                    <WrenchIcon size={18} />
+                  </div>
+                </div>
+                <div className="metric-body">
+                  <strong className="metric-val">{openComplaintsCount}</strong>
+                  <span className="metric-sub">
+                    {openComplaintsCount === 1 ? "1 active ticket" : `${openComplaintsCount} active tickets`}
+                  </span>
+                </div>
+              </div>
+
+              {/* TOTAL PAID */}
+              <div className="tenant-metric-card">
+                <div className="metric-header">
+                  <span className="metric-title">TOTAL RENT PAID</span>
+                  <div className="metric-icon-wrap green">
+                    <CheckIcon size={18} />
+                  </div>
+                </div>
+                <div className="metric-body">
+                  <strong className="metric-val">
+                    ₹
+                    {totalPaidRent.toLocaleString("en-IN", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </strong>
+                  <span className="metric-sub">
+                    {payments.filter((p) => p.status === "paid").length} confirmed payments
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* TWO-COLUMN DETAILS SECTION */}
+            <div className="tenant-dash-sections">
+              {/* LEFT / MAIN COLUMN */}
+              <div className="tenant-dash-left">
+                {/* ACTIVE LEASE DETAILS */}
                 {activeLease ? (
-                  <div className="tenant-lease-details">
-                    <div className="tenant-unit-hero">
-                      <div>
-                        <h3>
-                          {activeLease.building_name} &bull; Unit {activeLease.unit_number || activeLease.unit_name}
-                        </h3>
-                        <p className="tenant-unit-sub">
-                          Floor {activeLease.floor_number ?? "N/A"} &bull; {activeLease.unit_type_display || activeLease.unit_type || "Residential"}
-                        </p>
+                  <div className="tenant-card">
+                    <div className="tenant-card-header">
+                      <div className="header-title-wrap">
+                        <LeaseIcon size={18} className="icon-accent" />
+                        <h3>Active Lease Agreement</h3>
                       </div>
-                      <div className="tenant-rent-badge">
-                        <span className="rent-amount">
-                          ₹{Number(activeLease.monthly_rent || 0).toLocaleString("en-IN")}
-                        </span>
-                        <span className="rent-freq">/ month</span>
-                      </div>
+                      <span className="lease-status-pill active">
+                        {activeLease.status ? activeLease.status.toUpperCase() : "ACTIVE"}
+                      </span>
                     </div>
 
-                    <div className="tenant-metrics-row">
-                      <div className="tenant-metric-box">
-                        <span className="metric-label">Security Deposit</span>
-                        <strong className="metric-val">
-                          ₹{Number(activeLease.security_deposit || 0).toLocaleString("en-IN")}
+                    <div className="tenant-lease-meta-grid">
+                      <div className="meta-item">
+                        <span className="meta-label">Building</span>
+                        <strong className="meta-val">{activeLease.building_name}</strong>
+                      </div>
+                      <div className="meta-item">
+                        <span className="meta-label">Unit</span>
+                        <strong className="meta-val">
+                          {activeLease.unit_number || activeLease.unit_name} ({activeLease.unit_type_display})
                         </strong>
                       </div>
-                      <div className="tenant-metric-box">
-                        <span className="metric-label">Lease Duration</span>
-                        <strong className="metric-val">
-                          {activeLease.start_date} to {activeLease.end_date || "Ongoing"}
+                      <div className="meta-item">
+                        <span className="meta-label">Lease Duration</span>
+                        <strong className="meta-val">
+                          {activeLease.start_date} &rarr; {activeLease.end_date}
                         </strong>
                       </div>
-                      <div className="tenant-metric-box">
-                        <span className="metric-label">Payment Day</span>
-                        <strong className="metric-val">
-                          {activeLease.rent_payment_day
-                            ? `Day ${activeLease.rent_payment_day} of month`
-                            : "1st of month"}
+                      <div className="meta-item">
+                        <span className="meta-label">Security Deposit</span>
+                        <strong className="meta-val">
+                          ₹
+                          {parseFloat(activeLease.security_deposit || 0).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
                         </strong>
                       </div>
                     </div>
 
                     {activeLease.agreement_file_url && (
-                      <div className="tenant-agreement-action">
+                      <div className="tenant-lease-download-row">
                         <a
                           href={activeLease.agreement_file_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="tenant-doc-btn"
+                          className="btn-lease-agreement"
                         >
-                          <DownloadIcon size={16} />
-                          <span>View Signed Agreement Document</span>
+                          <DownloadIcon size={15} />
+                          <span>Download Signed Lease Agreement</span>
                         </a>
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="tenant-empty-state">
-                    <LeaseIcon size={36} />
-                    <p>No active lease assigned yet.</p>
-                    <small>Contact your property manager to link your lease.</small>
-                  </div>
-                )}
-              </section>
+                ) : null}
 
-              {/* Maintenance Requests Section */}
-              <section className="tenant-card">
-                <div className="tenant-card-header">
-                  <div className="tenant-card-title-group">
-                    <MaintenanceIcon size={18} className="card-icon" />
-                    <h2>Maintenance Requests</h2>
+                {/* RECENT INVOICES */}
+                <div className="tenant-card">
+                  <div className="tenant-card-header">
+                    <div className="header-title-wrap">
+                      <FileTextIcon size={18} className="icon-accent" />
+                      <h3>Recent Invoices</h3>
+                    </div>
+                    <Link to="/tenant/invoices" className="card-link-more">
+                      View All &rarr;
+                    </Link>
                   </div>
-                  <button
-                    type="button"
-                    className="tenant-btn-sm"
-                    onClick={() => setShowMaintenanceModal(true)}
-                  >
-                    <PlusIcon size={14} />
-                    <span>New Ticket</span>
-                  </button>
+
+                  {recentInvoices.length === 0 ? (
+                    <div className="card-empty-state">
+                      <p>No invoices generated yet.</p>
+                    </div>
+                  ) : (
+                    <div className="tenant-mini-invoices-list">
+                      {recentInvoices.map((inv) => {
+                        const invNo = `INV-${String(inv.id).padStart(6, "0")}`;
+                        const isPaid = inv.status === "paid";
+                        return (
+                          <div key={inv.id} className="mini-invoice-row">
+                            <div className="inv-left">
+                              <span className="inv-tag">{invNo}</span>
+                              <span className="inv-due">Due: {inv.due_date}</span>
+                            </div>
+
+                            <div className="inv-center">
+                              <strong>
+                                ₹
+                                {parseFloat(inv.amount || 0).toLocaleString("en-IN", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </strong>
+                            </div>
+
+                            <div className="inv-right">
+                              <span
+                                className={`mini-status-pill ${
+                                  isPaid ? "paid" : "pending"
+                                }`}
+                              >
+                                {inv.status ? inv.status.toUpperCase() : "PENDING"}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn-mini-pdf"
+                                onClick={() => handleDownloadInvoice(inv.id)}
+                                disabled={downloadingId === inv.id}
+                                title="Download PDF"
+                              >
+                                <DownloadIcon size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                {maintenanceList.length > 0 ? (
-                  <div className="tenant-maint-list">
-                    {maintenanceList.map((req) => (
-                      <div key={req.id} className="tenant-maint-item">
-                        <div className="tenant-maint-left">
-                          <div className="tenant-maint-title-row">
-                            <h4>{req.title}</h4>
-                            <span
-                              className={`tenant-prio-tag ${req.priority || "medium"}`}
-                            >
-                              {req.priority?.toUpperCase()}
-                            </span>
-                          </div>
-                          <p className="tenant-maint-desc">{req.description}</p>
-                          <span className="tenant-maint-meta">
-                            Unit {req.unit_number || req.unit_name || activeLease?.unit_number} &bull;{" "}
-                            {new Date(req.created_at).toLocaleDateString("en-IN", {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </span>
-                        </div>
-                        <div className="tenant-maint-right">
-                          <span
-                            className={`tenant-status-tag ${
-                              req.status === "resolved"
-                                ? "active"
-                                : req.status === "in_progress"
-                                ? "pending"
-                                : "overdue"
-                            }`}
-                          >
-                            {req.status?.replace("_", " ").toUpperCase() || "PENDING"}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                {/* RECENT MAINTENANCE TICKETS */}
+                <div className="tenant-card">
+                  <div className="tenant-card-header">
+                    <div className="header-title-wrap">
+                      <MaintenanceIcon size={18} className="icon-accent" />
+                      <h3>Recent Maintenance Complaints</h3>
+                    </div>
+                    <Link to="/tenant/maintenance" className="card-link-more">
+                      View All &rarr;
+                    </Link>
                   </div>
-                ) : (
-                  <div className="tenant-empty-state">
-                    <MaintenanceIcon size={36} />
-                    <p>No maintenance requests logged.</p>
-                    <small>Everything running smoothly in your unit!</small>
-                  </div>
-                )}
-              </section>
-            </div>
 
-            {/* Right Column: Payments & Invoices */}
-            <div className="tenant-grid-col side-col">
-              <section className="tenant-card">
-                <div className="tenant-card-header">
-                  <div className="tenant-card-title-group">
-                    <PaymentIcon size={18} className="card-icon" />
-                    <h2>Rent Payments</h2>
+                  {recentComplaints.length === 0 ? (
+                    <div className="card-empty-state">
+                      <p>No complaints submitted yet.</p>
+                    </div>
+                  ) : (
+                    <div className="tenant-mini-complaints-list">
+                      {recentComplaints.map((c) => {
+                        const isResolved = c.status === "resolved" || c.status === "closed";
+                        return (
+                          <div key={c.id} className="mini-complaint-item">
+                            <div className="complaint-top">
+                              <span className="mini-complaint-title">{c.title}</span>
+                              <span
+                                className={`mini-status-pill ${
+                                  isResolved ? "resolved" : "open"
+                                }`}
+                              >
+                                {c.status ? c.status.replace("_", " ").toUpperCase() : "OPEN"}
+                              </span>
+                            </div>
+                            <p className="mini-complaint-desc">{c.description}</p>
+                            {c.landlord_response && (
+                              <div className="mini-complaint-resp">
+                                <strong>Landlord reply:</strong> {c.landlord_response}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT / SECONDARY COLUMN */}
+              <div className="tenant-dash-right">
+                {/* PROFILE INFORMATION CARD */}
+                <div className="tenant-card">
+                  <div className="tenant-card-header">
+                    <div className="header-title-wrap">
+                      <UserIcon size={18} className="icon-accent" />
+                      <h3>Tenant Profile</h3>
+                    </div>
                   </div>
-                  <span className="tenant-count-badge">{payments.length} Records</span>
+
+                  <div className="profile-details-list">
+                    <div className="profile-row">
+                      <span className="profile-label">Full Name</span>
+                      <strong className="profile-val">{tenantName}</strong>
+                    </div>
+
+                    <div className="profile-row">
+                      <span className="profile-label">Email Address</span>
+                      <span className="profile-val">
+                        {tenantProfile?.email || user.email || "-"}
+                      </span>
+                    </div>
+
+                    <div className="profile-row">
+                      <span className="profile-label">Phone Number</span>
+                      <span className="profile-val">
+                        {tenantProfile?.phone || "-"}
+                      </span>
+                    </div>
+
+                    <div className="profile-row">
+                      <span className="profile-label">Emergency Contact</span>
+                      <span className="profile-val">
+                        {tenantProfile?.emergency_contact || "-"}
+                        {tenantProfile?.emergency_phone
+                          ? ` (${tenantProfile.emergency_phone})`
+                          : ""}
+                      </span>
+                    </div>
+
+                    {tenantProfile?.shop_name && (
+                      <>
+                        <div className="profile-row">
+                          <span className="profile-label">Business / Shop</span>
+                          <strong className="profile-val">
+                            {tenantProfile.shop_name}
+                          </strong>
+                        </div>
+                        <div className="profile-row">
+                          <span className="profile-label">GST Number</span>
+                          <span className="profile-val">
+                            {tenantProfile.gst_number || "None"}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                {payments.length > 0 ? (
-                  <div className="tenant-payments-list">
-                    {payments.map((p) => (
-                      <div key={p.id} className="tenant-payment-item">
-                        <div className="tenant-payment-details">
-                          <div className="tenant-payment-top">
-                            <span className="payment-inv-no">
-                              {p.invoice_number || `INV-${String(p.id).padStart(5, "0")}`}
-                            </span>
-                            <span
-                              className={`tenant-status-tag ${
-                                p.status === "paid"
-                                  ? "active"
-                                  : p.status === "pending"
-                                  ? "pending"
-                                  : "overdue"
-                              }`}
-                            >
-                              {p.status?.toUpperCase() || "PENDING"}
-                            </span>
-                          </div>
-                          <div className="tenant-payment-val">
-                            <RupeeIcon size={16} />
-                            <span>{Number(p.amount || 0).toLocaleString("en-IN")}</span>
-                          </div>
-                          <span className="tenant-payment-date">
-                            Due: {p.due_date} {p.paid_date ? `| Paid: ${p.paid_date}` : ""}
-                          </span>
-                        </div>
-
-                        <div className="tenant-payment-actions">
-                          <button
-                            type="button"
-                            className="tenant-btn-link"
-                            onClick={() => navigate(`/invoice/${p.id}`)}
-                            title="View Rent Invoice"
-                          >
-                            Invoice
-                          </button>
-                          {p.status === "paid" && (
-                            <button
-                              type="button"
-                              className="tenant-btn-link receipt"
-                              onClick={() => navigate(`/receipt/${p.id}`)}
-                              title="View Payment Receipt"
-                            >
-                              Receipt
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                {/* QUICK ASSISTANCE CARD */}
+                <div className="tenant-card support-card">
+                  <h4>Need Assistance?</h4>
+                  <p>
+                    For emergency repairs, maintenance issues, or questions regarding your rent invoice, please submit a maintenance ticket or contact your property management office.
+                  </p>
+                  <div className="support-actions">
+                    <Link to="/tenant/maintenance" className="btn-support-ticket">
+                      <WrenchIcon size={15} />
+                      <span>Create Support Ticket</span>
+                    </Link>
                   </div>
-                ) : (
-                  <div className="tenant-empty-state">
-                    <PaymentIcon size={36} />
-                    <p>No payment statements yet.</p>
-                    <small>Payment entries will appear when generated by your landlord.</small>
-                  </div>
-                )}
-              </section>
+                </div>
+              </div>
             </div>
-          </div>
+          </>
         )}
-      </main>
-
-      {/* Maintenance Ticket Modal */}
-      {showMaintenanceModal && (
-        <div className="tenant-modal-overlay" onClick={() => setShowMaintenanceModal(false)}>
-          <div className="tenant-modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="tenant-modal-header">
-              <div className="modal-title-group">
-                <h3>Submit Maintenance Request</h3>
-                <p>Report an issue with plumbing, electrical, or general repairs.</p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                onClick={() => setShowMaintenanceModal(false)}
-              >
-                <CloseIcon size={18} />
-              </button>
-            </div>
-
-            {requestError && (
-              <div className="tenant-alert error in-modal">
-                <WarningIcon size={16} />
-                <span>{requestError}</span>
-              </div>
-            )}
-
-            {requestSuccess && (
-              <div className="tenant-alert success in-modal">
-                <CheckIcon size={16} />
-                <span>{requestSuccess}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateRequest} className="tenant-modal-form">
-              <div className="form-group">
-                <label>Unit / Property</label>
-                <select
-                  value={newRequest.unit}
-                  onChange={(e) =>
-                    setNewRequest((prev) => ({ ...prev, unit: e.target.value }))
-                  }
-                  required
-                >
-                  <option value="">Select your rented unit</option>
-                  {leases.map((l) => (
-                    <option key={l.id} value={l.unit}>
-                      {l.building_name} - Unit {l.unit_number || l.unit_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Priority Level</label>
-                <select
-                  value={newRequest.priority}
-                  onChange={(e) =>
-                    setNewRequest((prev) => ({ ...prev, priority: e.target.value }))
-                  }
-                >
-                  <option value="low">Low - Minor cosmetic or non-urgent</option>
-                  <option value="medium">Medium - Normal repair needed</option>
-                  <option value="high">High - Needs prompt attention</option>
-                  <option value="urgent">Urgent - Water leak, power outage, safety</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Issue Summary</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Kitchen sink faucet leaking"
-                  value={newRequest.title}
-                  onChange={(e) =>
-                    setNewRequest((prev) => ({ ...prev, title: e.target.value }))
-                  }
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Detailed Description</label>
-                <textarea
-                  rows="4"
-                  placeholder="Describe the issue, location in the unit, and best time for inspection..."
-                  value={newRequest.description}
-                  onChange={(e) =>
-                    setNewRequest((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="tenant-modal-actions">
-                <button
-                  type="button"
-                  className="tenant-btn-cancel"
-                  onClick={() => setShowMaintenanceModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="tenant-btn-submit"
-                  disabled={submittingRequest}
-                >
-                  {submittingRequest ? "Submitting..." : "Submit Ticket"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      </div>
+    </TenantLayout>
   );
 }
 

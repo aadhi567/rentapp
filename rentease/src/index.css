@@ -130,3 +130,128 @@ textarea {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* =========================================================
+   DARK MODE SYSTEM TOKENS & OVERRIDES
+   ========================================================= */
+[data-theme="dark"] {
+  /* Color Palette - Premium Modern Dark Theme */
+  --bg-page: #090d16;
+  --bg-surface: #111827;
+  --bg-subtle: #1e293b;
+  --bg-muted: #334155;
+  --bg-hover: #1b2434;
+
+  /* Primary Brand (Slightly brighter for high contrast dark readability) */
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-active: #2563eb;
+  --primary-light: rgba(59, 130, 246, 0.16);
+  --primary-border: rgba(59, 130, 246, 0.35);
+  --primary-text: #93c5fd;
+
+  /* Status & Accents */
+  --success: #10b981;
+  --success-light: rgba(16, 185, 129, 0.16);
+  --success-border: rgba(16, 185, 129, 0.35);
+  --success-text: #6ee7b7;
+
+  --warning: #f59e0b;
+  --warning-light: rgba(245, 158, 11, 0.16);
+  --warning-border: rgba(245, 158, 11, 0.35);
+  --warning-text: #fcd34d;
+
+  --danger: #ef4444;
+  --danger-light: rgba(239, 68, 68, 0.16);
+  --danger-border: rgba(239, 68, 68, 0.35);
+  --danger-text: #fca5a5;
+
+  --info: #0ea5e9;
+  --info-light: rgba(14, 165, 233, 0.16);
+  --info-border: rgba(14, 165, 233, 0.35);
+  --info-text: #7dd3fc;
+
+  --purple: #a855f7;
+  --purple-light: rgba(168, 85, 247, 0.16);
+  --purple-border: rgba(168, 85, 247, 0.35);
+  --purple-text: #d8b4fe;
+
+  /* Text Colors */
+  --text-main: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  --text-inverse: #0f172a;
+
+  /* Borders & Dividers */
+  --border-color: #1e293b;
+  --border-subtle: #162032;
+  --border-focus: #3b82f6;
+
+  /* Shadows for Dark Mode */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.6), 0 1px 2px -1px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.6), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.7), 0 4px 6px -4px rgb(0 0 0 / 0.5);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.8), 0 8px 10px -6px rgb(0 0 0 / 0.5);
+}
+
+/* Dark mode scrollbars */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Dark mode global form inputs */
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+/* Dark mode tables & card containers */
+[data-theme="dark"] table {
+  color: var(--text-main);
+}
+
+[data-theme="dark"] th {
+  background-color: var(--bg-subtle) !important;
+  color: var(--text-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] td {
+  border-color: var(--border-color) !important;
+  color: var(--text-main);
+}
+
+[data-theme="dark"] tr:hover td {
+  background-color: var(--bg-hover) !important;
+}
+
+[data-theme="dark"] .card,
+[data-theme="dark"] .table-card,
+[data-theme="dark"] .modal-content,
+[data-theme="dark"] .modal-box,
+[data-theme="dark"] .dropdown-menu {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border-color: var(--border-color);
+}

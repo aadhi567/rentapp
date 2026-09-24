@@ -121,6 +121,18 @@ class InputValidationTests(TestCase):
         self.assertFalse(serializer_short_pin.is_valid())
         self.assertIn("pincode", serializer_short_pin.errors)
 
+        # Invalid pincode with leading zero
+        serializer_zero_pin = BuildingSerializer(data={
+            "name": "Tower A",
+            "address": "12 Main St",
+            "city": "Chennai",
+            "state": "Tamil Nadu",
+            "pincode": "060001",
+            "number_of_floors": 3,
+        })
+        self.assertFalse(serializer_zero_pin.is_valid())
+        self.assertIn("pincode", serializer_zero_pin.errors)
+
         # Invalid number of floors <= 0
         serializer_floors = BuildingSerializer(data={
             "name": "Tower A",

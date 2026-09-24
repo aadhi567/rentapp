@@ -1,3 +1,4 @@
+import os
 import re
 from django.utils import timezone
 from rest_framework import serializers
@@ -13,7 +14,27 @@ from .models import (
     Payment,
     MaintenanceRequest,
     BillingEmailLog,
+    PaymentTransaction,
+    Landlord,
+    NotificationPreference,
 )
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            "id",
+            "rent_payment_received",
+            "rent_payment_pending",
+            "rent_overdue",
+            "maintenance_requests",
+            "lease_expiry",
+            "new_tenant",
+            "theme",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "updated_at"]
 
 
 class InvoiceSettingsSerializer(serializers.ModelSerializer):
@@ -107,7 +128,7 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
                 })
 
         pincode = attrs.get("pincode", getattr(self.instance, "pincode", ""))
-        if pincode and not re.match(r"^\d{6}$", pincode.strip()):
+        if pincode and not re.match(r"^[1-9][0-9]{5}$", pincode.strip()):
             raise serializers.ValidationError({
                 "pincode": "Pincode must contain exactly 6 digits."
             })
@@ -192,7 +213,7 @@ class BuildingSerializer(serializers.ModelSerializer):
 
     def validate_pincode(self, value):
         value = (value or "").strip()
-        if not re.match(r"^\d{6}$", value):
+        if not re.match(r"^[1-9][0-9]{5}$", value):
             raise serializers.ValidationError("Pincode must contain exactly 6 digits.")
         return value
 
@@ -353,6 +374,8 @@ class TenantSerializer(serializers.ModelSerializer):
             "active_lease",
             "current_unit",
             "current_building",
+            "must_change_password",
+            "landlord",
             "created_at",
             "updated_at",
         ]
@@ -364,9 +387,12 @@ class TenantSerializer(serializers.ModelSerializer):
             "active_lease",
             "current_unit",
             "current_building",
+            "must_change_password",
+            "landlord",
             "created_at",
             "updated_at",
         ]
+
 
     def validate_first_name(self, value):
         value = (value or "").strip()
@@ -945,6 +971,9 @@ class PaymentSerializer(
 
     latest_invoice_email = serializers.SerializerMethodField()
     latest_receipt_email = serializers.SerializerMethodField()
+    latest_transaction = serializers.SerializerMethodField()
+    utr = serializers.SerializerMethodField()
+    transaction_reference = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -975,6 +1004,9 @@ class PaymentSerializer(
             "status",
             "status_display",
             "transaction_id",
+            "transaction_reference",
+            "utr",
+            "latest_transaction",
             "latest_invoice_email",
             "latest_receipt_email",
             "created_at",
@@ -998,6 +1030,9 @@ class PaymentSerializer(
             "payment_type_display",
             "payment_method_display",
             "status_display",
+            "transaction_reference",
+            "utr",
+            "latest_transaction",
             "latest_invoice_email",
             "latest_receipt_email",
             "created_at",
@@ -1034,6 +1069,30 @@ class PaymentSerializer(
             "sent_at": log.sent_at,
             "created_at": log.created_at,
         }
+
+    def get_latest_transaction(self, obj):
+        txn = obj.transactions.order_by("-created_at").first()
+        if not txn:
+            return None
+        return {
+            "id": txn.id,
+            "transaction_reference": txn.transaction_reference,
+            "utr": txn.utr,
+            "status": txn.status,
+            "status_display": txn.get_status_display(),
+            "amount": str(txn.amount),
+            "upi_id": txn.upi_id,
+            "initiated_at": txn.initiated_at,
+            "paid_at": txn.paid_at,
+        }
+
+    def get_utr(self, obj):
+        txn = obj.transactions.filter(status__in=["PENDING", "SUCCESS"]).order_by("-created_at").first()
+        return txn.utr if txn else ""
+
+    def get_transaction_reference(self, obj):
+        txn = obj.transactions.order_by("-created_at").first()
+        return txn.transaction_reference if txn else ""
 
     def validate(self, attrs):
         amount = attrs.get("amount")
@@ -1122,6 +1181,21 @@ class MaintenanceRequestSerializer(
         read_only=True,
     )
 
+    category_display = serializers.CharField(
+        source="get_category_display",
+        read_only=True,
+    )
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+
+    priority_display = serializers.CharField(
+        source="get_priority_display",
+        read_only=True,
+    )
+
     class Meta:
         model = MaintenanceRequest
         fields = [
@@ -1137,10 +1211,16 @@ class MaintenanceRequestSerializer(
             "tenant",
             "tenant_name",
             "title",
+            "category",
+            "category_display",
             "description",
             "priority",
+            "priority_display",
             "status",
+            "status_display",
             "image",
+            "landlord_response",
+            "resolved_at",
             "created_at",
             "updated_at",
         ]
@@ -1155,9 +1235,49 @@ class MaintenanceRequestSerializer(
             "floor_number",
             "tenant",
             "tenant_name",
+            "category_display",
+            "priority_display",
+            "status_display",
             "created_at",
             "updated_at",
         ]
+
+    def validate_image(self, value):
+        if not value:
+            return value
+
+        # File size limit: 5 MB
+        max_size = 5 * 1024 * 1024
+        if value.size > max_size:
+            raise serializers.ValidationError("Attached image file size must not exceed 5 MB.")
+
+        allowed_extensions = [".jpg", ".jpeg", ".png", ".webp"]
+        ext = os.path.splitext(value.name)[1].lower()
+        if ext not in allowed_extensions:
+            raise serializers.ValidationError(
+                f"Unsupported image format '{ext}'. Allowed formats are JPEG, PNG, and WebP."
+            )
+
+        content_type = getattr(value, "content_type", "").lower()
+        if content_type and content_type not in ["image/jpeg", "image/png", "image/webp", "image/pjpeg"]:
+            raise serializers.ValidationError(
+                f"Invalid file MIME type '{content_type}'. Must be JPEG, PNG, or WebP."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        user = request.user if request else None
+
+        if user and hasattr(user, "tenant_profile"):
+            attrs.pop("landlord_response", None)
+            attrs.pop("resolved_at", None)
+            if self.instance:
+                attrs.pop("status", None)
+
+        return attrs
+
 
 
 class BillingEmailLogSerializer(serializers.ModelSerializer):
@@ -1189,4 +1309,90 @@ class BillingEmailLogSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = fields
+        read_only_fields = fields
+
+
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    tenant_name = serializers.CharField(source="tenant.full_name", read_only=True)
+    tenant_email = serializers.EmailField(source="tenant.email", read_only=True)
+    tenant_phone = serializers.CharField(source="tenant.phone", read_only=True)
+    landlord_name = serializers.CharField(source="landlord.user.get_full_name", read_only=True)
+    building_name = serializers.CharField(source="building.name", read_only=True)
+    unit_number = serializers.CharField(source="payment.lease.unit.unit_number", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    invoice_due_date = serializers.DateField(source="payment.due_date", read_only=True)
+    upi_uri = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            "id",
+            "tenant",
+            "tenant_name",
+            "tenant_email",
+            "tenant_phone",
+            "landlord",
+            "landlord_name",
+            "building",
+            "building_name",
+            "unit_number",
+            "payment",
+            "invoice_due_date",
+            "amount",
+            "currency",
+            "payment_method",
+            "upi_id",
+            "transaction_reference",
+            "utr",
+            "status",
+            "status_display",
+            "description",
+            "upi_uri",
+            "initiated_at",
+            "paid_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "tenant",
+            "tenant_name",
+            "tenant_email",
+            "tenant_phone",
+            "landlord",
+            "landlord_name",
+            "building",
+            "building_name",
+            "unit_number",
+            "payment",
+            "invoice_due_date",
+            "amount",
+            "currency",
+            "payment_method",
+            "upi_id",
+            "transaction_reference",
+            "status",
+            "status_display",
+            "upi_uri",
+            "initiated_at",
+            "paid_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_upi_uri(self, obj):
+        if obj.status == "CANCELLED":
+            return None
+        try:
+            from .upi_service import build_upi_intent_uri
+            payee_name = obj.landlord.user.get_full_name() or obj.landlord.user.username
+            return build_upi_intent_uri(
+                upi_id=obj.upi_id,
+                payee_name=payee_name,
+                amount=obj.amount,
+                transaction_ref=obj.transaction_reference,
+                note=obj.description or f"Rent payment {obj.transaction_reference}",
+            )
+        except Exception:
+            return None
+

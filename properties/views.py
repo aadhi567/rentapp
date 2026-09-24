@@ -20,9 +20,15 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import (
     FormParser,
     MultiPartParser,
+    JSONParser,
 )
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from .tenant_auth_service import (
+    provision_tenant_user,
+    reset_tenant_user_password,
+)
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -51,6 +57,7 @@ from .models import (
     Payment,
     MaintenanceRequest,
     BillingEmailLog,
+    PaymentTransaction,
 )
 
 from .serializers import (
@@ -64,6 +71,13 @@ from .serializers import (
     PaymentSerializer,
     MaintenanceRequestSerializer,
     BillingEmailLogSerializer,
+    PaymentTransactionSerializer,
+)
+
+from .upi_service import (
+    validate_utr,
+    generate_transaction_reference,
+    build_upi_intent_uri,
 )
 
 from .billing_communication import (
@@ -545,11 +559,10 @@ class TenantViewSet(viewsets.ModelViewSet):
             return (
                 Tenant.objects
                 .filter(
-                    leases__unit__floor__building__landlord=(
-                        user.landlord_profile
-                    )
+                    Q(leases__unit__floor__building__landlord=user.landlord_profile)
+                    | Q(landlord=user.landlord_profile)
                 )
-                .select_related("user")
+                .select_related("user", "landlord")
                 .prefetch_related(
                     "leases__unit__floor__building",
                     "leases__reminders",
@@ -568,12 +581,12 @@ class TenantViewSet(viewsets.ModelViewSet):
         ):
             return Tenant.objects.filter(
                 id=user.tenant_profile.id
-            ).select_related("user")
+            ).select_related("user", "landlord")
 
         return Tenant.objects.none()
 
-    def perform_create(self, serializer):
-        user = self.request.user
+    def create(self, request, *args, **kwargs):
+        user = request.user
 
         if not hasattr(
             user,
@@ -583,20 +596,91 @@ class TenantViewSet(viewsets.ModelViewSet):
                 "Only landlords can create tenants."
             )
 
-        serializer.save()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            tenant = serializer.save(landlord=user.landlord_profile)
+            user_account, temp_password, email_sent = provision_tenant_user(
+                tenant,
+                landlord=user.landlord_profile,
+            )
+
+        headers = self.get_success_headers(serializer.data)
+        response_data = dict(serializer.data)
+
+        if temp_password:
+            response_data["temporary_credentials"] = {
+                "email": tenant.email or user_account.email or user_account.username,
+                "username": user_account.username,
+                "temporary_password": temp_password,
+                "must_change_password": True,
+                "email_sent": email_sent,
+                "message": "Tenant user credentials created. The tenant must change their password after first login.",
+            }
+
+        return Response(
+            response_data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
 
     def perform_update(self, serializer):
         user = self.request.user
 
-        if not hasattr(
+        if hasattr(
             user,
             "landlord_profile",
         ):
+            serializer.save()
+        elif hasattr(
+            user,
+            "tenant_profile",
+        ):
+            if serializer.instance.id != user.tenant_profile.id:
+                raise PermissionDenied(
+                    "You can only update your own profile."
+                )
+            serializer.save()
+        else:
             raise PermissionDenied(
                 "Only landlords can update tenants."
             )
 
-        serializer.save()
+    @action(detail=True, methods=["post"], url_path="reset-password")
+    def reset_password(self, request, pk=None):
+        user = request.user
+        if not hasattr(user, "landlord_profile"):
+            raise PermissionDenied("Only landlords can reset tenant passwords.")
+
+        tenant = self.get_object()
+
+        is_own_tenant = (
+            tenant.landlord == user.landlord_profile
+            or tenant.leases.filter(unit__floor__building__landlord=user.landlord_profile).exists()
+        )
+        if not is_own_tenant and not user.is_staff:
+            raise PermissionDenied("You can only reset passwords for tenants associated with your buildings.")
+
+        user_account, temp_password, email_sent = reset_tenant_user_password(
+            tenant,
+            landlord=user.landlord_profile,
+        )
+
+        return Response(
+            {
+                "detail": f"Temporary password reset successfully for tenant {tenant.full_name}.",
+                "temporary_credentials": {
+                    "email": tenant.email or user_account.email or user_account.username,
+                    "username": user_account.username,
+                    "temporary_password": temp_password,
+                    "must_change_password": True,
+                    "email_sent": email_sent,
+                    "message": "New temporary password generated. Please share these credentials securely with the tenant.",
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class LeaseViewSet(viewsets.ModelViewSet):
@@ -1063,6 +1147,7 @@ class LeaseViewSet(viewsets.ModelViewSet):
                 )
 
             tenant = Tenant.objects.create(
+                landlord=landlord,
                 first_name=first_name,
                 last_name=last_name,
                 shop_name=shop_name,
@@ -1073,6 +1158,11 @@ class LeaseViewSet(viewsets.ModelViewSet):
                 phone=phone,
                 emergency_contact=emergency_contact,
                 emergency_phone=emergency_phone,
+            )
+
+            new_tenant_user, new_tenant_temp_pw, new_tenant_email_sent = provision_tenant_user(
+                tenant,
+                landlord=landlord,
             )
 
             if is_commercial:
@@ -1251,8 +1341,19 @@ class LeaseViewSet(viewsets.ModelViewSet):
             },
         )
 
+        response_data = dict(serializer.data)
+        if tenant_mode == "new" and "new_tenant_temp_pw" in locals() and new_tenant_temp_pw:
+            response_data["temporary_credentials"] = {
+                "email": tenant.email or (new_tenant_user.email if new_tenant_user else "") or (new_tenant_user.username if new_tenant_user else ""),
+                "username": new_tenant_user.username if new_tenant_user else "",
+                "temporary_password": new_tenant_temp_pw,
+                "must_change_password": True,
+                "email_sent": new_tenant_email_sent,
+                "message": "Tenant user credentials created. The tenant must change their password after first login.",
+            }
+
         return Response(
-            serializer.data,
+            response_data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -2782,7 +2883,13 @@ def _receipt_pdf(payment, settings, request):
     payment_lines = []
     payment_lines.append(f"Payment date: {_safe_text(receipt_date)}")
     payment_lines.append(f"Payment method: {_safe_text(payment.get_payment_method_display()) or '-'}")
-    payment_lines.append(f"Transaction / Reference: {_safe_text(payment.transaction_id) or '-'}")
+    successful_txn = payment.transactions.filter(status="SUCCESS").order_by("-paid_at").first()
+    if successful_txn:
+        payment_lines.append(f"Transaction Reference: {_safe_text(successful_txn.transaction_reference)}")
+        if successful_txn.utr:
+            payment_lines.append(f"UPI / Bank UTR: {_safe_text(successful_txn.utr)}")
+    else:
+        payment_lines.append(f"Transaction / Reference: {_safe_text(payment.transaction_id) or '-'}")
     story.append(Paragraph("PAYMENT CONFIRMATION", styles["ReceiptSection"]))
     story.append(Paragraph("<br/>".join(payment_lines), styles["ReceiptBody"]))
     story.append(Spacer(1, 3 * mm))
@@ -3416,6 +3523,11 @@ class MaintenanceRequestViewSet(
 ):
     serializer_class = MaintenanceRequestSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [
+        MultiPartParser,
+        FormParser,
+        JSONParser,
+    ]
 
     def get_queryset(self):
         user = self.request.user
@@ -3424,39 +3536,48 @@ class MaintenanceRequestViewSet(
             user,
             "landlord_profile",
         ):
-            return (
-                MaintenanceRequest.objects.filter(
-                    unit__floor__building__landlord=(
-                        user.landlord_profile
-                    )
+            qs = MaintenanceRequest.objects.filter(
+                unit__floor__building__landlord=(
+                    user.landlord_profile
                 )
-                .select_related(
-                    "unit",
-                    "unit__floor",
-                    "unit__floor__building",
-                    "tenant",
-                )
-                .order_by("-created_at")
             )
-
-        if hasattr(
+        elif hasattr(
             user,
             "tenant_profile",
         ):
-            return (
-                MaintenanceRequest.objects.filter(
-                    tenant=user.tenant_profile
-                )
-                .select_related(
-                    "unit",
-                    "unit__floor",
-                    "unit__floor__building",
-                    "tenant",
-                )
-                .order_by("-created_at")
+            qs = MaintenanceRequest.objects.filter(
+                tenant=user.tenant_profile
             )
+        elif user.is_staff:
+            qs = MaintenanceRequest.objects.all()
+        else:
+            return MaintenanceRequest.objects.none()
 
-        return MaintenanceRequest.objects.none()
+        building_id = self.request.query_params.get("building")
+        if building_id:
+            qs = qs.filter(unit__floor__building_id=building_id)
+
+        status_param = self.request.query_params.get("status")
+        if status_param and status_param != "all":
+            qs = qs.filter(status=status_param)
+
+        priority_param = self.request.query_params.get("priority")
+        if priority_param and priority_param != "all":
+            qs = qs.filter(priority=priority_param)
+
+        category_param = self.request.query_params.get("category")
+        if category_param and category_param != "all":
+            qs = qs.filter(category=category_param)
+
+        return (
+            qs.select_related(
+                "unit",
+                "unit__floor",
+                "unit__floor__building",
+                "tenant",
+            )
+            .order_by("-created_at")
+        )
 
     def perform_create(
         self,
@@ -3472,9 +3593,16 @@ class MaintenanceRequestViewSet(
                 "Only tenants can create maintenance requests."
             )
 
-        unit = serializer.validated_data[
-            "unit"
-        ]
+        unit = serializer.validated_data.get("unit")
+        if not unit:
+            active_leases = Lease.objects.filter(
+                tenant=user.tenant_profile,
+                status="active",
+            )
+            if active_leases.count() == 1:
+                unit = active_leases.first().unit
+            else:
+                raise ValidationError({"unit": "Please specify a unit for the maintenance complaint."})
 
         active_lease = Lease.objects.filter(
             unit=unit,
@@ -3488,8 +3616,49 @@ class MaintenanceRequestViewSet(
             )
 
         serializer.save(
-            tenant=user.tenant_profile
+            tenant=user.tenant_profile,
+            unit=unit,
+            status="open",
         )
+
+    def update(self, request, *args, **kwargs):
+        user = request.user
+        instance = self.get_object()
+
+        is_landlord = (
+            hasattr(user, "landlord_profile")
+            and instance.unit.floor.building.landlord == user.landlord_profile
+        )
+
+        if not is_landlord and not user.is_staff:
+            raise PermissionDenied("Only the landlord of this property can update complaint status and responses.")
+
+        partial = kwargs.pop("partial", False)
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        new_status = serializer.validated_data.get("status", instance.status)
+        resolved_at = instance.resolved_at
+        if new_status in ["resolved", "closed"] and not resolved_at:
+            resolved_at = timezone.now()
+        elif new_status in ["open", "in_progress"]:
+            resolved_at = None
+
+        serializer.save(resolved_at=resolved_at)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        user = request.user
+        instance = self.get_object()
+
+        is_landlord = (
+            hasattr(user, "landlord_profile")
+            and instance.unit.floor.building.landlord == user.landlord_profile
+        )
+        if not is_landlord and not user.is_staff:
+            raise PermissionDenied("Only landlords can delete maintenance complaints.")
+
+        return super().destroy(request, *args, **kwargs)
 
 
 class BillingEmailLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -3821,4 +3990,208 @@ class AnalyticsViewSet(viewsets.ViewSet):
             "payment_methods": methods,
             "aging_analysis": aging,
             "upcoming_expiries": upcoming_expiries,
-        })
+        })
+
+
+class PaymentTransactionViewSet(viewsets.ModelViewSet):
+    """
+    Manages the lifecycle of real UPI rent payments:
+    - initiate: Creates a PENDING transaction and generates UPI URI
+    - submit-utr: Tenant submits bank UTR (status remains PENDING)
+    - cancel: Tenant or Landlord cancels pending transaction
+    - verify: Landlord legitimately verifies payment, marking transaction SUCCESS and invoice PAID
+    """
+    serializer_class = PaymentTransactionSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, "landlord_profile"):
+            return (
+                PaymentTransaction.objects.filter(landlord=user.landlord_profile)
+                .select_related(
+                    "tenant",
+                    "landlord",
+                    "building",
+                    "payment",
+                    "payment__lease",
+                    "payment__lease__unit",
+                )
+                .order_by("-created_at")
+            )
+        if hasattr(user, "tenant_profile"):
+            return (
+                PaymentTransaction.objects.filter(tenant=user.tenant_profile)
+                .select_related(
+                    "tenant",
+                    "landlord",
+                    "building",
+                    "payment",
+                    "payment__lease",
+                    "payment__lease__unit",
+                )
+                .order_by("-created_at")
+            )
+        return PaymentTransaction.objects.none()
+
+    @action(detail=False, methods=["post"], url_path="initiate")
+    def initiate(self, request):
+        user = request.user
+        if not hasattr(user, "tenant_profile"):
+            raise PermissionDenied("Only authenticated tenants can initiate UPI rent payments.")
+
+        tenant = user.tenant_profile
+        payment_id = request.data.get("payment_id")
+        if not payment_id:
+            raise ValidationError("payment_id is required.")
+
+        try:
+            payment = Payment.objects.select_related(
+                "lease",
+                "lease__unit",
+                "lease__unit__floor",
+                "lease__unit__floor__building",
+                "lease__unit__floor__building__landlord",
+                "lease__unit__floor__building__landlord__user",
+            ).get(id=payment_id, lease__tenant=tenant)
+        except Payment.DoesNotExist:
+            raise ValidationError("Invoice not found or does not belong to your tenant account.")
+
+        if payment.status == "paid":
+            raise ValidationError("This invoice has already been verified and paid.")
+
+        building = payment.lease.unit.floor.building
+        landlord = building.landlord
+        upi_id = landlord.get_effective_upi_id(building=building)
+
+        if not upi_id:
+            raise ValidationError(
+                "The landlord has not configured a UPI ID for this property yet. "
+                "Please inform your landlord to enter their UPI ID in Invoice Settings."
+            )
+
+        # Reuse existing PENDING transaction if already initiated for this invoice
+        existing_pending = payment.transactions.filter(status="PENDING").order_by("-created_at").first()
+        if existing_pending:
+            if existing_pending.upi_id != upi_id:
+                existing_pending.upi_id = upi_id
+                existing_pending.save(update_fields=["upi_id", "updated_at"])
+            serializer = self.get_serializer(existing_pending)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        transaction_ref = generate_transaction_reference(prefix="RENT")
+        unit_num = payment.lease.unit.unit_number or payment.lease.unit.name
+        billing_period = payment.due_date.strftime("%b %Y")
+        description = f"Rent for Unit {unit_num} - {billing_period}"
+
+        txn = PaymentTransaction.objects.create(
+            tenant=tenant,
+            landlord=landlord,
+            building=building,
+            payment=payment,
+            amount=payment.amount,
+            currency="INR",
+            payment_method="upi",
+            upi_id=upi_id,
+            transaction_reference=transaction_ref,
+            status="PENDING",
+            description=description,
+        )
+
+        serializer = self.get_serializer(txn)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="submit-utr")
+    def submit_utr(self, request, pk=None):
+        user = request.user
+        if not hasattr(user, "tenant_profile"):
+            raise PermissionDenied("Only tenants can submit a payment UTR.")
+
+        txn = self.get_object()
+        if txn.tenant != user.tenant_profile:
+            raise PermissionDenied("You do not have permission to submit UTR for this transaction.")
+
+        if txn.status != "PENDING":
+            raise ValidationError(f"Cannot submit UTR for transaction with status {txn.status}.")
+
+        raw_utr = request.data.get("utr", "")
+        cleaned_utr = validate_utr(raw_utr)
+
+        if PaymentTransaction.objects.filter(utr=cleaned_utr, status="SUCCESS").exclude(id=txn.id).exists():
+            raise ValidationError("This UTR has already been submitted and verified for another transaction.")
+
+        txn.utr = cleaned_utr
+        txn.save(update_fields=["utr", "updated_at"])
+
+        serializer = self.get_serializer(txn)
+        return Response(
+            {
+                "detail": "UTR submitted successfully. Your payment is pending landlord verification.",
+                "transaction": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        user = request.user
+        txn = self.get_object()
+
+        is_owner_tenant = hasattr(user, "tenant_profile") and txn.tenant == user.tenant_profile
+        is_owner_landlord = hasattr(user, "landlord_profile") and txn.landlord == user.landlord_profile
+        if not (is_owner_tenant or is_owner_landlord or user.is_staff):
+            raise PermissionDenied("You do not have permission to cancel this transaction.")
+
+        if txn.status != "PENDING":
+            raise ValidationError(f"Cannot cancel a transaction with status {txn.status}.")
+
+        txn.status = "CANCELLED"
+        txn.save(update_fields=["status", "updated_at"])
+
+        serializer = self.get_serializer(txn)
+        return Response(
+            {
+                "detail": "Transaction cancelled successfully.",
+                "transaction": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="verify")
+    def verify(self, request, pk=None):
+        user = request.user
+        if not hasattr(user, "landlord_profile") and not user.is_staff:
+            raise PermissionDenied("Only the landlord can verify rent payment transactions.")
+
+        txn = self.get_object()
+        if txn.landlord != getattr(user, "landlord_profile", None) and not user.is_staff:
+            raise PermissionDenied("You do not have permission to verify transactions for this property.")
+
+        if txn.status != "PENDING":
+            raise ValidationError(f"Cannot verify a transaction with status {txn.status}.")
+
+        if txn.payment.status == "paid":
+            raise ValidationError("The associated rent invoice has already been marked as paid.")
+
+        with transaction.atomic():
+            txn.status = "SUCCESS"
+            txn.paid_at = timezone.now()
+            txn.save(update_fields=["status", "paid_at", "updated_at"])
+
+            payment = txn.payment
+            payment.status = "paid"
+            payment.paid_date = timezone.localdate()
+            payment.payment_method = "upi"
+            payment.transaction_id = txn.utr or txn.transaction_reference
+            payment.save(update_fields=["status", "paid_date", "payment_method", "transaction_id"])
+
+        serializer = self.get_serializer(txn)
+        return Response(
+            {
+                "detail": "Payment verified successfully. Receipt is now available.",
+                "transaction": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+

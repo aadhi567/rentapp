@@ -1,0 +1,247 @@
+.tenant-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f0fdf4 0%, #eff6ff 50%, #f8fafc 100%);
+  padding: 24px 16px;
+  font-family: inherit;
+}
+
+.tenant-login-container {
+  width: 100%;
+  max-width: 440px;
+}
+
+.tenant-login-card {
+  background-color: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  padding: 36px 32px;
+  box-shadow: 0 10px 25px -5px rgba(0, 86, 210, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+}
+
+.tenant-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.tenant-login-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0056d2 0%, #1e40af 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px -2px rgba(0, 86, 210, 0.35);
+  flex-shrink: 0;
+}
+
+.tenant-login-brand-meta h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #0f172a;
+}
+
+.tenant-portal-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0056d2;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.tenant-login-header {
+  margin-bottom: 24px;
+}
+
+.tenant-login-header h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #0f172a;
+}
+
+.tenant-login-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.tenant-login-error-alert {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  line-height: 1.4;
+}
+
+.tenant-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tenant-login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tenant-login-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.tenant-login-field input {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  font-size: 14px;
+  color: #0f172a;
+  background-color: #ffffff;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+
+.tenant-login-field input:focus {
+  outline: none;
+  border-color: #0056d2;
+  box-shadow: 0 0 0 3px rgba(0, 86, 210, 0.15);
+}
+
+.tenant-password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.tenant-password-input-wrap input {
+  padding-right: 42px;
+}
+
+.tenant-pw-toggle-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.tenant-pw-toggle-btn:hover {
+  color: #475569;
+}
+
+.tenant-first-login-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.tenant-login-submit-btn {
+  width: 100%;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #0056d2 0%, #1e40af 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 10px -2px rgba(0, 86, 210, 0.35);
+  transition: all 0.15s ease;
+  margin-top: 6px;
+}
+
+.tenant-login-submit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0046a8 0%, #172554 100%);
+  box-shadow: 0 6px 14px -3px rgba(0, 86, 210, 0.45);
+  transform: translateY(-1px);
+}
+
+.tenant-login-submit-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.tenant-btn-loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tenant-btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: tenant-spin 0.8s linear infinite;
+}
+
+@keyframes tenant-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tenant-login-footer {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.tenant-landlord-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.tenant-switch-link {
+  color: #0056d2;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.tenant-switch-link:hover {
+  text-decoration: underline;
+  color: #1e40af;
+}

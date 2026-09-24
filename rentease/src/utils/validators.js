@@ -90,7 +90,7 @@ export const isValidPhone = (phone) => {
 };
 
 export const isValidPincode = (pincode) => {
-  return /^\d{6}$/.test(String(pincode).trim());
+  return /^[1-9][0-9]{5}$/.test(String(pincode).trim());
 };
 
 export const isValidIFSC = (ifsc) => {

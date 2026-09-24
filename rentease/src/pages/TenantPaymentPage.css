@@ -1,0 +1,761 @@
+.upi-payment-container {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 12px 0 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ALERTS */
+.upi-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md, 10px);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.upi-alert-danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.upi-alert-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+/* SUCCESS / PAID STATE */
+.upi-paid-success-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
+  padding: 48px 32px;
+  text-align: center;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05));
+  max-width: 640px;
+  margin: 20px auto;
+}
+
+.upi-success-badge {
+  width: 72px;
+  height: 72px;
+  background: #dcfce7;
+  color: #16a34a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+}
+
+.upi-paid-success-card h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin: 0 0 8px;
+}
+
+.upi-success-sub {
+  color: var(--text-secondary, #64748b);
+  font-size: 15px;
+  margin: 0 0 28px;
+}
+
+.upi-receipt-summary {
+  background: var(--bg-page, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-md, 12px);
+  padding: 18px 24px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.upi-receipt-summary .summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.upi-receipt-summary .summary-row span {
+  color: var(--text-secondary, #64748b);
+}
+
+.upi-receipt-summary .summary-row strong,
+.upi-receipt-summary .summary-row code {
+  color: var(--text-primary, #0f172a);
+  font-weight: 600;
+}
+
+.upi-pill-paid {
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 9999px;
+}
+
+.upi-success-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.upi-btn-download-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--primary, #2563eb);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upi-btn-download-receipt:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.upi-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-page, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  color: var(--text-primary, #0f172a);
+  border-radius: var(--radius-md, 10px);
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.upi-btn-secondary:hover {
+  background: #f1f5f9;
+}
+
+/* FLOW GRID */
+.upi-flow-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 24px;
+}
+
+@media (max-width: 860px) {
+  .upi-flow-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* SUMMARY CARD (LEFT) */
+.upi-summary-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
+  padding: 24px;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05));
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: fit-content;
+}
+
+.upi-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  padding-bottom: 16px;
+}
+
+.upi-card-header h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary, #0f172a);
+  margin: 0;
+}
+
+.upi-status-pill {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.5px;
+}
+
+.upi-status-pill.pending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.upi-status-pill.overdue {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.upi-amount-block {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md, 12px);
+  padding: 20px;
+  text-align: center;
+}
+
+.upi-amount-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.upi-amount-val {
+  font-size: 34px;
+  font-weight: 800;
+  color: #1e3a8a;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1.1;
+}
+
+.upi-amount-val .symbol {
+  font-size: 26px;
+}
+
+.upi-amount-fixed-hint {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 8px;
+}
+
+.upi-details-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.upi-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.upi-detail-item .label {
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.upi-detail-item .value {
+  color: var(--text-primary, #0f172a);
+  font-size: 14px;
+}
+
+.upi-id-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.upi-id-copy-row code {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-family: monospace;
+  color: #0f172a;
+}
+
+.upi-btn-copy {
+  background: transparent;
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upi-btn-copy:hover {
+  background: #f8fafc;
+  color: var(--text-primary, #0f172a);
+}
+
+.upi-assurance-box {
+  display: flex;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.assurance-icon {
+  font-size: 20px;
+}
+
+.assurance-text strong {
+  display: block;
+  font-size: 13px;
+  color: #0f172a;
+  margin-bottom: 2px;
+}
+
+.assurance-text p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+  margin: 0;
+}
+
+/* ACTION CARD (RIGHT) */
+.upi-action-card {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
+  padding: 28px;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.05));
+  display: flex;
+  flex-direction: column;
+}
+
+/* INITIATE STEP */
+.upi-initiate-step {
+  text-align: center;
+  padding: 36px 16px;
+  margin: auto 0;
+}
+
+.upi-step-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--primary-light, #eff6ff);
+  color: var(--primary, #2563eb);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 18px;
+}
+
+.upi-initiate-step h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--text-primary, #0f172a);
+}
+
+.upi-step-desc {
+  font-size: 14px;
+  color: var(--text-secondary, #64748b);
+  max-width: 440px;
+  margin: 0 auto 24px;
+  line-height: 1.5;
+}
+
+.upi-confirmation-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: #166534;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.upi-btn-primary {
+  background: var(--primary, #2563eb);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md, 12px);
+  padding: 14px 32px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  transition: all 0.2s ease;
+}
+
+.upi-btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+}
+
+.upi-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ACTIVE STEP & TRACKER */
+.upi-status-tracker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  padding: 0 8px;
+}
+
+.tracker-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.tracker-step .circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.tracker-step.active .circle {
+  border-color: var(--primary, #2563eb);
+  color: var(--primary, #2563eb);
+  background: #eff6ff;
+}
+
+.tracker-step.completed .circle {
+  border-color: #16a34a;
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.tracker-step.completed span,
+.tracker-step.active span {
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+.tracker-line {
+  flex: 1;
+  height: 2px;
+  background: #e2e8f0;
+  margin: 0 10px -14px;
+}
+
+.tracker-line.completed {
+  background: #16a34a;
+}
+
+/* MOBILE INTENT BLOCK */
+.upi-mobile-block {
+  text-align: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.upi-mobile-block h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.upi-mobile-block p {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 18px;
+}
+
+.upi-btn-intent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #16a34a;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 14px 28px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(22, 163, 74, 0.3);
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.upi-btn-intent:hover {
+  background: #15803d;
+  transform: translateY(-1px);
+}
+
+.upi-intent-note {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 14px !important;
+}
+
+/* DESKTOP QR BLOCK */
+.upi-desktop-qr-block {
+  text-align: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.upi-desktop-qr-block h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.qr-sub {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0 0 18px;
+}
+
+.upi-qr-frame {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  background: #ffffff;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.08));
+}
+
+.upi-qr-image svg {
+  display: block;
+  border-radius: 4px;
+}
+
+.qr-caption {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e3a8a;
+  margin-top: 8px;
+}
+
+.upi-supported-apps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.app-tag {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* UTR FORM */
+.upi-utr-section {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 20px;
+}
+
+.utr-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.utr-section-header h4 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary, #0f172a);
+}
+
+.upi-pill-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-verifying {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.utr-help-text {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.upi-utr-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.utr-input-group {
+  display: flex;
+  gap: 10px;
+}
+
+.utr-input {
+  flex: 1;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.utr-input:focus {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.utr-input.error {
+  border-color: #ef4444;
+}
+
+.upi-btn-submit-utr {
+  background: #0f172a;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.upi-btn-submit-utr:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.upi-btn-submit-utr:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.utr-error-msg {
+  font-size: 12px;
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.utr-submitted-notice {
+  margin-top: 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #15803d;
+}
+
+.utr-submitted-notice code {
+  font-weight: 700;
+  background: #dcfce7;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* FOOTER ACTIONS */
+.upi-step-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.upi-btn-refresh-status {
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+
+.upi-btn-refresh-status:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.upi-btn-cancel-txn {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.upi-btn-cancel-txn:hover {
+  text-decoration: underline;
+}

@@ -396,6 +396,12 @@ function InvoiceSettings() {
                 name="pincode"
                 value={form.pincode}
                 onChange={handleChange}
+                placeholder="600040"
+                maxLength={6}
+                pattern="^[1-9][0-9]{5}$"
+                title="Please enter a valid 6-digit Indian pincode starting with 1-9."
+                inputMode="numeric"
+                autoComplete="postal-code"
               />
             </label>
           </div>

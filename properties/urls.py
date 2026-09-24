@@ -13,11 +13,18 @@ from .views import (
     MaintenanceRequestViewSet,
     BillingEmailLogViewSet,
     AnalyticsViewSet,
+    PaymentTransactionViewSet,
 )
 
 
 
 router = DefaultRouter()
+
+router.register(
+    r"transactions",
+    PaymentTransactionViewSet,
+    basename="transaction",
+)
 
 router.register(
     r"analytics",

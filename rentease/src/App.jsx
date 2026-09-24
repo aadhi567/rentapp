@@ -19,16 +19,20 @@ import Leases from "./pages/Leases";
 import Payments from "./pages/Payments";
 import Reminders from "./pages/Reminders";
 import Analytics from "./pages/Analytics";
+import LandlordMaintenance from "./pages/LandlordMaintenance";
 
+import TenantLogin from "./pages/TenantLogin";
 import TenantDashboard from "./pages/TenantDashboard";
+import TenantInvoices from "./pages/TenantInvoices";
+import TenantReceipts from "./pages/TenantReceipts";
+import TenantMaintenance from "./pages/TenantMaintenance";
+import TenantPaymentPage from "./pages/TenantPaymentPage";
+import TenantPaymentHistory from "./pages/TenantPaymentHistory";
+
 import InvoiceSettings from "./pages/InvoiceSettings";
+import Settings from "./pages/Settings";
 import LandlordLayout from "./components/LandlordLayout";
-import {
-  MaintenanceIcon,
-  AnalyticsIcon,
-  ReminderIcon,
-  SettingsIcon,
-} from "./components/Icons";
+import { SettingsIcon } from "./components/Icons";
 
 function PagePlaceholder({ title, subtitle, icon, description }) {
   return (
@@ -118,64 +122,238 @@ function PagePlaceholder({ title, subtitle, icon, description }) {
   );
 }
 
+function LandlordRoute({ children }) {
+  const token = localStorage.getItem("access_token");
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (user.role === "tenant") {
+      return <Navigate to="/tenant/dashboard" replace />;
+    }
+  } catch (e) {
+    // Ignore JSON error
+  }
+
+  return children;
+}
+
+function TenantRoute({ children }) {
+  const token = localStorage.getItem("access_token");
+  if (!token) {
+    return <Navigate to="/tenant/login" replace />;
+  }
+
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (user.role === "landlord") {
+      return <Navigate to="/landlord/dashboard" replace />;
+    }
+  } catch (e) {
+    // Ignore JSON error
+  }
+
+  return children;
+}
+
+function RootRedirect() {
+  const token = localStorage.getItem("access_token");
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (user.role === "tenant") {
+      return <Navigate to="/tenant/dashboard" replace />;
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  return <Navigate to="/landlord/dashboard" replace />;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
-        {/* Landlord Routes */}
-        <Route path="/landlord/dashboard" element={<LandlordDashboard />} />
-        <Route path="/landlord/invoice-settings" element={<InvoiceSettings />} />
-        <Route path="/landlord/buildings" element={<Buildings />} />
-        <Route path="/landlord/buildings/:id" element={<BuildingDashboard />} />
-        <Route path="/landlord/floors/:id" element={<FloorDashboard />} />
-        <Route path="/landlord/tenants" element={<Tenants />} />
-        <Route path="/landlord/leases" element={<Leases />} />
-        <Route path="/landlord/payments" element={<Payments />} />
-        <Route path="/landlord/invoices/:paymentId" element={<InvoiceView />} />
-        <Route path="/landlord/receipts/:paymentId" element={<ReceiptView />} />
+        {/* Dedicated Tenant Login */}
+        <Route path="/tenant/login" element={<TenantLogin />} />
+
+        {/* Tenant Portal Routes (Protected) */}
+        <Route
+          path="/tenant/dashboard"
+          element={
+            <TenantRoute>
+              <TenantDashboard />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/tenant/invoices"
+          element={
+            <TenantRoute>
+              <TenantInvoices />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/tenant/pay/:paymentId"
+          element={
+            <TenantRoute>
+              <TenantPaymentPage />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/tenant/payments"
+          element={
+            <TenantRoute>
+              <TenantPaymentHistory />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/tenant/receipts"
+          element={
+            <TenantRoute>
+              <TenantReceipts />
+            </TenantRoute>
+          }
+        />
+        <Route
+          path="/tenant/maintenance"
+          element={
+            <TenantRoute>
+              <TenantMaintenance />
+            </TenantRoute>
+          }
+        />
+
+        {/* Landlord Routes (Protected) */}
+        <Route
+          path="/landlord/dashboard"
+          element={
+            <LandlordRoute>
+              <LandlordDashboard />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/invoice-settings"
+          element={
+            <LandlordRoute>
+              <InvoiceSettings />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/buildings"
+          element={
+            <LandlordRoute>
+              <Buildings />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/buildings/:id"
+          element={
+            <LandlordRoute>
+              <BuildingDashboard />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/floors/:id"
+          element={
+            <LandlordRoute>
+              <FloorDashboard />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/tenants"
+          element={
+            <LandlordRoute>
+              <Tenants />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/leases"
+          element={
+            <LandlordRoute>
+              <Leases />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/payments"
+          element={
+            <LandlordRoute>
+              <Payments />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/invoices/:paymentId"
+          element={
+            <LandlordRoute>
+              <InvoiceView />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/receipts/:paymentId"
+          element={
+            <LandlordRoute>
+              <ReceiptView />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/maintenance"
+          element={
+            <LandlordRoute>
+              <LandlordMaintenance />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/analytics"
+          element={
+            <LandlordRoute>
+              <Analytics />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/reminders"
+          element={
+            <LandlordRoute>
+              <Reminders />
+            </LandlordRoute>
+          }
+        />
+        <Route
+          path="/landlord/settings"
+          element={
+            <LandlordRoute>
+              <Settings />
+            </LandlordRoute>
+          }
+        />
 
         {/* Aliases for quick links */}
         <Route path="/invoice/:paymentId" element={<InvoiceView />} />
         <Route path="/receipt/:paymentId" element={<ReceiptView />} />
-
-        <Route
-          path="/landlord/maintenance"
-          element={
-            <PagePlaceholder
-              title="Maintenance Management"
-              icon={<MaintenanceIcon size={30} />}
-              description="Review tenant repair requests, dispatch service technicians, and schedule routine preventive maintenance across all properties."
-            />
-          }
-        />
-
-        <Route
-          path="/landlord/analytics"
-          element={<Analytics />}
-        />
-
-        <Route
-          path="/landlord/reminders"
-          element={<Reminders />}
-        />
-
-        <Route
-          path="/landlord/settings"
-          element={
-            <PagePlaceholder
-              title="System Settings"
-              icon={<SettingsIcon size={30} />}
-              description="Manage organization preferences, team member roles, security settings, and third-party accounting integrations."
-            />
-          }
-        />
-
-        {/* Tenant Portal */}
-        <Route path="/tenant/dashboard" element={<TenantDashboard />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/login" replace />} />

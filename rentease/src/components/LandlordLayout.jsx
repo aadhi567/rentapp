@@ -15,7 +15,6 @@ import {
   MenuIcon,
   CloseIcon,
   HomeIcon,
-  FileTextIcon,
 } from "./Icons";
 import "./LandlordLayout.css";
 
@@ -75,7 +74,7 @@ export default function LandlordLayout({
     },
     {
       id: "leases",
-      label: "Leases",
+      label: "Agreements",
       path: "/landlord/leases",
       icon: <LeaseIcon size={19} />,
       matches: (p) => p.startsWith("/landlord/leases"),
@@ -117,13 +116,6 @@ export default function LandlordLayout({
   ];
 
   const secondaryNavItems = [
-    {
-      id: "invoice-settings",
-      label: "Invoice Template",
-      path: "/landlord/invoice-settings",
-      icon: <FileTextIcon size={18} />,
-      matches: (p) => p === "/landlord/invoice-settings",
-    },
     {
       id: "settings",
       label: "Settings",

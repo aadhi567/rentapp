@@ -1480,5 +1480,133 @@ class TenantBillingCommunicationTests(TestCase):
         self.assertIn("Landlord Official UPI QR", sent_rec.alternatives[0][0])
 
 
+class SettingsAndNotificationPreferencesTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_a = User.objects.create_user(
+            username="settings_landlord_a",
+            password="OldPassword123!",
+            email="landlord_a@example.com",
+            first_name="Alice",
+            last_name="Owner",
+        )
+        self.landlord_a = Landlord.objects.create(
+            user=self.user_a,
+            phone="9876543210",
+        )
+
+        self.user_b = User.objects.create_user(
+            username="settings_landlord_b",
+            password="OtherPassword123!",
+            email="landlord_b@example.com",
+            first_name="Bob",
+            last_name="Owner",
+        )
+        self.landlord_b = Landlord.objects.create(
+            user=self.user_b,
+            phone="9876543211",
+        )
+
+    def test_current_user_profile_get_and_patch(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        # GET profile
+        resp = self.client.get("/api/auth/me/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["full_name"], "Alice Owner")
+        self.assertEqual(resp.data["email"], "landlord_a@example.com")
+        self.assertEqual(resp.data["phone"], "9876543210")
+        self.assertEqual(resp.data["role"], "landlord")
+        self.assertEqual(resp.data["theme"], "system")
+
+        # PATCH profile
+        patch_resp = self.client.patch("/api/auth/me/", {
+            "full_name": "Alice M. Owner",
+            "email": "alice.updated@example.com",
+            "phone": "9988776655",
+            "role": "tenant",  # Attempt to modify role
+        })
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertEqual(patch_resp.data["full_name"], "Alice M. Owner")
+        self.assertEqual(patch_resp.data["email"], "alice.updated@example.com")
+        self.assertEqual(patch_resp.data["phone"], "9988776655")
+        # Role must NOT be changed
+        self.assertEqual(patch_resp.data["role"], "landlord")
+
+        # Verify DB updated
+        self.user_a.refresh_from_db()
+        self.landlord_a.refresh_from_db()
+        self.assertEqual(self.user_a.first_name, "Alice")
+        self.assertEqual(self.user_a.last_name, "M. Owner")
+        self.assertEqual(self.user_a.email, "alice.updated@example.com")
+        self.assertEqual(self.landlord_a.phone, "9988776655")
+
+        # Validation: Phone invalid format
+        err_phone_resp = self.client.patch("/api/auth/me/", {"phone": "abc-invalid"})
+        self.assertEqual(err_phone_resp.status_code, 400)
+
+        # Validation: Duplicate email
+        err_email_resp = self.client.patch("/api/auth/me/", {"email": "landlord_b@example.com"})
+        self.assertEqual(err_email_resp.status_code, 400)
+
+    def test_notification_preferences_get_and_patch(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        # GET initial preferences
+        resp = self.client.get("/api/notification-preferences/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["rent_payment_received"])
+        self.assertTrue(resp.data["rent_overdue"])
+        self.assertEqual(resp.data["theme"], "system")
+
+        # PATCH preferences
+        patch_resp = self.client.patch("/api/notification-preferences/", {
+            "rent_overdue": False,
+            "theme": "dark",
+        })
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertFalse(patch_resp.data["rent_overdue"])
+        self.assertEqual(patch_resp.data["theme"], "dark")
+
+        # Isolation test: Landlord B gets their own preferences (not Landlord A's)
+        self.client.force_authenticate(user=self.user_b)
+        resp_b = self.client.get("/api/notification-preferences/")
+        self.assertEqual(resp_b.status_code, 200)
+        self.assertTrue(resp_b.data["rent_overdue"])
+        self.assertEqual(resp_b.data["theme"], "system")
+
+    def test_change_password_flow(self):
+        self.client.force_authenticate(user=self.user_a)
+
+        # Mismatched passwords
+        resp_mismatch = self.client.post("/api/auth/change-password/", {
+            "old_password": "OldPassword123!",
+            "new_password": "NewSecurePassword123!",
+            "confirm_password": "DifferentPassword123!",
+        })
+        self.assertEqual(resp_mismatch.status_code, 400)
+
+        # Wrong old password
+        resp_wrong = self.client.post("/api/auth/change-password/", {
+            "old_password": "WrongPassword123!",
+            "new_password": "NewSecurePassword123!",
+            "confirm_password": "NewSecurePassword123!",
+        })
+        self.assertEqual(resp_wrong.status_code, 400)
+
+        # Successful change
+        resp_ok = self.client.post("/api/auth/change-password/", {
+            "old_password": "OldPassword123!",
+            "new_password": "NewSecurePassword123!",
+            "confirm_password": "NewSecurePassword123!",
+        })
+        self.assertEqual(resp_ok.status_code, 200)
+
+        # Verify new password
+        self.user_a.refresh_from_db()
+        self.assertTrue(self.user_a.check_password("NewSecurePassword123!"))
+
+
+
 
 

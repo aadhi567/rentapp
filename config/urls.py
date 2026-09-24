@@ -13,9 +13,12 @@ from properties.auth_views import (
     CurrentUserView,
     RentEaseTokenObtainPairView,
     LandlordLoginView,
+    TenantLoginView,
+    ChangePasswordView,
     CheckEmailView,
     GoogleLoginView,
     SystemAccountsView,
+    NotificationPreferenceView,
 )
 
 
@@ -70,6 +73,18 @@ urlpatterns = [
     ),
 
     path(
+        "api/auth/tenant-login/",
+        TenantLoginView.as_view(),
+        name="tenant_login",
+    ),
+
+    path(
+        "api/auth/change-password/",
+        ChangePasswordView.as_view(),
+        name="change_password",
+    ),
+
+    path(
         "api/auth/refresh/",
         TokenRefreshView.as_view(),
         name="token_refresh",
@@ -79,6 +94,12 @@ urlpatterns = [
         "api/auth/me/",
         CurrentUserView.as_view(),
         name="current_user",
+    ),
+
+    path(
+        "api/notification-preferences/",
+        NotificationPreferenceView.as_view(),
+        name="notification_preferences",
     ),
 ]
 

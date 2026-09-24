@@ -11,6 +11,7 @@ import {
 import LandlordLayout from "../components/LandlordLayout";
 import { PlusIcon } from "../components/Icons";
 import "./Leases.css";
+import TenantCredentialsModal from "../components/TenantCredentialsModal";
 
 
 import { API_URL } from "../api";
@@ -68,6 +69,11 @@ function Leases() {
 
   const [showRenewal, setShowRenewal] =
     useState(false);
+
+  // New Tenant Credentials Modal
+  const [newTenantCredentials, setNewTenantCredentials] = useState(null);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [newTenantName, setNewTenantName] = useState("");
 
 
   const [selectedLease, setSelectedLease] =
@@ -1336,6 +1342,14 @@ function Leases() {
 
 
         closeAllModals();
+
+        if (data.temporary_credentials) {
+          setNewTenantCredentials(data.temporary_credentials);
+          setNewTenantName(
+            `${tenantForm.first_name} ${tenantForm.last_name || ""}`.trim()
+          );
+          setShowCredentialsModal(true);
+        }
 
         await loadData();
 
@@ -4107,6 +4121,20 @@ function Leases() {
 
         </div>
       )}
+
+      {/* ONE-TIME TENANT CREDENTIALS MODAL */}
+      <TenantCredentialsModal
+        isOpen={showCredentialsModal}
+        onClose={() => {
+          setShowCredentialsModal(false);
+          setNewTenantCredentials(null);
+          setNewTenantName("");
+        }}
+        credentials={newTenantCredentials}
+        tenantName={newTenantName}
+        title="Tenant Login Credentials Created"
+        isReset={false}
+      />
 
     </LandlordLayout>
   );

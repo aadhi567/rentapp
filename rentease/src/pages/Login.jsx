@@ -398,10 +398,18 @@ function Login() {
 
           {/* FOOTER */}
           <div className="login-footer">
-            <span>Don't have an account?</span>
-            <Link to="/signup" className="login-signup-link">
-              Create an account
-            </Link>
+            <div style={{ marginBottom: "10px" }}>
+              <span>Don't have an account?</span>{" "}
+              <Link to="/signup" className="login-signup-link">
+                Create an account
+              </Link>
+            </div>
+            <div style={{ fontSize: "13px", color: "var(--text-secondary, #64748b)" }}>
+              <span>Are you a tenant?</span>{" "}
+              <Link to="/tenant/login" style={{ color: "#0056d2", fontWeight: 600, textDecoration: "none" }}>
+                Sign in to Tenant Portal &rarr;
+              </Link>
+            </div>
           </div>
         </div>
       </div>

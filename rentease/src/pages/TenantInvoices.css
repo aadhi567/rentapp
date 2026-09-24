@@ -1,0 +1,352 @@
+.tenant-invoices-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* STATS */
+.tenant-inv-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.tenant-stat-card {
+  background-color: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.tenant-stat-card.warning {
+  border-left: 4px solid #f59e0b;
+}
+
+.tenant-stat-card.success {
+  border-left: 4px solid #10b981;
+}
+
+.tenant-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.5px;
+}
+
+.tenant-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tenant-stat-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* TOOLBAR */
+.tenant-inv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  background-color: #ffffff;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.tenant-inv-search input {
+  width: 320px;
+  max-width: 100%;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.tenant-inv-search input:focus {
+  outline: none;
+  border-color: #0056d2;
+  box-shadow: 0 0 0 2px rgba(0, 86, 210, 0.15);
+}
+
+.tenant-filter-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.tenant-pill-btn {
+  padding: 6px 14px;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tenant-pill-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.tenant-pill-btn.active {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+  color: #0056d2;
+}
+
+/* TABLE */
+.tenant-inv-table-wrapper {
+  background-color: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  overflow-x: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.tenant-inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.tenant-inv-table th {
+  padding: 14px 18px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+}
+
+.tenant-inv-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.tenant-inv-table tr:hover {
+  background-color: #f8fafc;
+}
+
+.tenant-inv-id-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0056d2;
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.tenant-inv-prop-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenant-inv-prop-cell strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.tenant-inv-prop-cell span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.tenant-inv-date-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.tenant-inv-amount {
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.tenant-inv-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tenant-inv-status-pill .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.tenant-inv-status-pill.paid {
+  background-color: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+.tenant-inv-status-pill.paid .status-dot {
+  background-color: #16a34a;
+}
+
+.tenant-inv-status-pill.pending {
+  background-color: #fefce8;
+  color: #ca8a04;
+  border: 1px solid #fef08a;
+}
+.tenant-inv-status-pill.pending .status-dot {
+  background-color: #ca8a04;
+}
+
+.tenant-inv-status-pill.overdue {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+.tenant-inv-status-pill.overdue .status-dot {
+  background-color: #dc2626;
+}
+
+.tenant-inv-actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tenant-btn-view-pdf,
+.tenant-btn-dl-pdf {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tenant-btn-view-pdf {
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+
+.tenant-btn-view-pdf:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.tenant-btn-dl-pdf {
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #0056d2;
+}
+
+.tenant-btn-dl-pdf:hover:not(:disabled) {
+  background-color: #dbeafe;
+}
+
+.tenant-btn-pay-rent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: #16a34a;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.tenant-btn-pay-rent:hover {
+  background-color: #15803d;
+  transform: translateY(-1px);
+}
+
+/* EMPTY & LOADING */
+.tenant-inv-empty-card {
+  background-color: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.tenant-empty-icon-wrap {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.tenant-inv-empty-card h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.tenant-inv-empty-card p {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.tenant-inv-loading {
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.tenant-inv-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #0056d2;
+  border-radius: 50%;
+  animation: tenant-spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+
+.tenant-inv-error-banner {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@keyframes tenant-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
